@@ -36,7 +36,6 @@ export const AuthProvider = ({ children }) => {
 
   const storeAuthenticatedUser = (data) => {
     syncedUserIdRef.current = data._id;
-    currentUserIdRef.current = data._id;
     setUser(data);
     localStorage.setItem('userInfo', JSON.stringify(data));
     localStorage.setItem('token', data.token);
@@ -70,7 +69,6 @@ export const AuthProvider = ({ children }) => {
       if (currentUserIdRef.current !== userId) return;
       if (error.response?.status === 401) {
         syncedUserIdRef.current = null;
-        currentUserIdRef.current = null;
         setUser(null);
         localStorage.removeItem('userInfo');
         localStorage.removeItem('token');
@@ -120,7 +118,6 @@ export const AuthProvider = ({ children }) => {
 
   const logout = useCallback(() => {
     syncedUserIdRef.current = null;
-    currentUserIdRef.current = null;
     setUser(null);
     localStorage.removeItem('userInfo');
     localStorage.removeItem('token');

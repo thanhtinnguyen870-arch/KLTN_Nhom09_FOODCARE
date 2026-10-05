@@ -1,6 +1,6 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import { Flame, Zap, Scale, Heart, Sparkles, AlertCircle, Info } from 'lucide-react';
-import { calculateMacroGoals, GOALS, ACTIVITY_LEVELS } from '../utils/nutritionCalculator';
+import { calculateMacroGoals } from '../utils/nutritionCalculator';
 
 const NutritionTargetCard = ({ healthProfile }) => {
   const result = useMemo(() => {

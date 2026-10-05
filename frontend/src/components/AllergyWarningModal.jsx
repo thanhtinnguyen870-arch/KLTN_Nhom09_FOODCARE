@@ -1,4 +1,3 @@
-import React from 'react';
 import { AlertTriangle, ShieldAlert, X, Check, HeartPulse } from 'lucide-react';
 
 const AllergyWarningModal = ({ isOpen, onClose, onConfirm, food, warnings }) => {

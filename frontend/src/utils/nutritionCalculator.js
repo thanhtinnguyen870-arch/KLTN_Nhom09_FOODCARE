@@ -65,8 +65,8 @@ export const calculateBMI = (weight, height) => {
   if (!w || !h || h <= 0) return null;
 
   const bmi = parseFloat((w / (h * h)).toFixed(1));
-  let category = '';
-  let color = '';
+  let category;
+  let color;
 
   if (bmi < 18.5) {
     category = 'Thiếu cân (Underweight)';

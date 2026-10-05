@@ -1,55 +1,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Activity,
   AlertCircle,
-  ArrowRight,
-  ArrowUpRight,
   Award,
   Bell,
   Bot,
-  Calendar,
   Camera,
   Check,
-  CheckCircle2,
-  ChevronDown,
-  ChevronLeft,
   ChevronRight,
   ClipboardList,
   Clock,
-  CreditCard,
   DollarSign,
   Edit3,
   ExternalLink,
   Eye,
   EyeOff,
-  Filter,
-  Flame,
   ImagePlus,
-  Inbox,
   LayoutDashboard,
   LogOut,
-  MapPin,
   Menu,
   Package,
   PanelLeftClose,
   PanelLeftOpen,
-  Phone,
   Plus,
   RefreshCw,
   Search,
-  Shield,
   ShieldAlert,
   ShieldCheck,
-  Sparkles,
-  Tag,
   Trash2,
   TrendingUp,
   Truck,
   Upload,
   User,
-  UserCheck,
   Users,
-  UserX,
   X,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -58,19 +40,6 @@ import axiosClient from '../api/axiosClient';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
 
-// ── DESIGN SYSTEM CONSTANTS ──
-const BRAND_COLORS = {
-  primary: '#16845B',
-  primaryDark: '#116344',
-  primaryLight: '#E8F5EE',
-  accentOrange: '#F59E0B',
-  accentLight: '#FFF4DF',
-  background: '#F7F9F6',
-  surface: '#FFFFFF',
-  textPrimary: '#17231D',
-  textSecondary: '#758278',
-  border: '#E8EEE9',
-};
 
 const statusLabels = {
   pending: 'Chờ xác nhận',
@@ -245,10 +214,27 @@ const AdminDashboard = () => {
   }, [aiTopicFilter, aiSearchTerm]);
 
   useEffect(() => {
-    if (activeTab === 'ai_logs') {
-      fetchAILogs();
-    }
-  }, [activeTab, fetchAILogs]);
+    if (activeTab !== 'ai_logs') return;
+    let isMounted = true;
+    const load = async () => {
+      setAiLogsLoading(true);
+      try {
+        const params = new URLSearchParams();
+        params.append('limit', '50');
+        if (aiTopicFilter && aiTopicFilter !== 'all') params.append('topic', aiTopicFilter);
+        if (aiSearchTerm.trim()) params.append('search', aiSearchTerm.trim());
+
+        const { data } = await axiosClient.get(`/ai/logs?${params.toString()}`);
+        if (isMounted) setAiLogs(data.logs || []);
+      } catch {
+        if (isMounted) toast.error('Không thể tải nhật ký câu hỏi AI.');
+      } finally {
+        if (isMounted) setAiLogsLoading(false);
+      }
+    };
+    load();
+    return () => { isMounted = false; };
+  }, [activeTab, aiTopicFilter, aiSearchTerm]);
 
   const handleDeleteAILog = async (id) => {
     if (!window.confirm('Xóa nhật ký câu hỏi này?')) return;

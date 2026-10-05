@@ -138,10 +138,12 @@ const AIChatbot = () => {
   const navigate = useNavigate();
 
   // Reset cuộc trò chuyện khi đổi tài khoản
-  useEffect(() => {
+  const [prevUserId, setPrevUserId] = useState(user?._id);
+  if (prevUserId !== user?._id) {
+    setPrevUserId(user?._id);
     setChatHistory([]);
     setMessage('');
-  }, [user?._id]);
+  }
 
   // Cuộn trang mượt mà qua requestAnimationFrame đảm bảo DOM render xong
   const scrollToBottom = useCallback(() => {
@@ -178,11 +180,11 @@ const AIChatbot = () => {
     }
   }, [isOpen, isFullscreen]);
 
-  const handleSendMessage = async (msgText) => {
+  const handleSendMessage = useCallback(async (msgText) => {
     const trimmed = (msgText || '').trim();
     if (!trimmed || loading || !user) return;
 
-    const tempId = `pending-${Date.now()}`;
+    const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const newMsg = {
       _id: tempId,
       message: trimmed,
@@ -214,7 +216,8 @@ const AIChatbot = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [loading, user]);
+
 
   const closeChat = useCallback(() => setIsOpen(false), []);
 

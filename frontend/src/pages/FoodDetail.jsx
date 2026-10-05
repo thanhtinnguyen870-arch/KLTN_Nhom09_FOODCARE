@@ -30,10 +30,11 @@ const FoodDetail = () => {
   const { user } = useAuth();
   const { addFavorite, isFavorited } = useFavorite();
 
+  const healthProfile = user?.healthProfile;
   const allergyCheck = useMemo(() => {
-    if (!food || !user?.healthProfile) return { hasConflict: false, warnings: [] };
-    return checkFoodHealthConflict(food, user.healthProfile);
-  }, [food, user?.healthProfile]);
+    if (!food || !healthProfile) return { hasConflict: false, warnings: [] };
+    return checkFoodHealthConflict(food, healthProfile);
+  }, [food, healthProfile]);
 
   // Nén ảnh phía client dùng Canvas API trước khi upload
   const compressImageClient = (file, { maxWidth = 1200, quality = 0.82 } = {}) =>

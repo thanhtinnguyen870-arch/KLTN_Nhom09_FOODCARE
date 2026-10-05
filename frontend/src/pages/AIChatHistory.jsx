@@ -58,23 +58,24 @@ const AIChatHistory = () => {
   const [viewScope, setViewScope] = useState('mine'); // 'mine' | 'all' (Admin only)
   const searchRef = useRef(null);
 
-  const fetchHistory = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
-    try {
-      const url = isAdmin && viewScope === 'all' ? '/ai/history?all=true' : '/ai/history';
-      const { data } = await axiosClient.get(url);
-      setHistory(Array.isArray(data) ? data : []);
-    } catch {
-      toast.error('Không thể tải lịch sử trò chuyện.');
-    } finally {
-      setLoading(false);
-    }
-  }, [user, isAdmin, viewScope]);
-
   useEffect(() => {
-    fetchHistory();
-  }, [fetchHistory]);
+    let isMounted = true;
+    if (!user) return;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const url = isAdmin && viewScope === 'all' ? '/ai/history?all=true' : '/ai/history';
+        const { data } = await axiosClient.get(url);
+        if (isMounted) setHistory(Array.isArray(data) ? data : []);
+      } catch {
+        if (isMounted) toast.error('Không thể tải lịch sử trò chuyện.');
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    };
+    load();
+    return () => { isMounted = false; };
+  }, [user, isAdmin, viewScope]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return history;

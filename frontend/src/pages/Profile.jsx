@@ -20,7 +20,6 @@ import {
   RotateCcw,
   ShoppingCart,
   ShieldAlert,
-  Sparkles,
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { useAuth } from '../context/AuthContext';
