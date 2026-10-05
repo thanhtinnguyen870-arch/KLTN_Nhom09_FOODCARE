@@ -166,14 +166,55 @@ export const recommendFood = async (req, res) => {
       unavailableNotice = `\n⚠️ CẢNH BÁO QUAN TRỌNG: Khách hàng đang hỏi về món ${namesStr} - món này hiện ĐANG TẠM HẾT trên hệ thống! BẮT BUỘC thông báo rõ ràng cho khách rằng món này đã tạm hết/hết hàng. Tuyệt đối KHÔNG được nói món này còn hàng và KHÔNG nhầm lẫn với bất kỳ món nào khác (ví dụ: không nhầm lẫn giữa "Cơm khoai lang gà cải xanh" và "Gà ta khoai lang cải xanh"). Có thể gợi ý món thay thế tương tự đang có sẵn.`;
     }
 
-    // Hồ sơ sức khỏe người dùng (chỉ nếu có)
-    const hp = user.healthProfile;
-    const healthSummary = [
-      hp?.age        ? `Tuổi: ${hp.age}`                                 : '',
-      hp?.conditions?.length ? `Bệnh: ${hp.conditions.join(', ')}`       : '',
-      hp?.allergies?.length  ? `Dị ứng: ${hp.allergies.join(', ')}`      : '',
-      hp?.goal       ? `Mục tiêu: ${hp.goal}`                            : '',
-    ].filter(Boolean).join(' | ') || 'Không có thông tin';
+    // Hồ sơ sức khỏe người dùng chi tiết (cân nặng, chiều cao, BMI, bệnh lý, dị ứng...)
+    const hp = user.healthProfile || {};
+    const healthParts = [];
+    if (hp.age) healthParts.push(`Tuổi: ${hp.age}`);
+    if (hp.gender) healthParts.push(`Giới tính: ${hp.gender === 'male' || hp.gender === 'Nam' ? 'Nam' : hp.gender === 'female' || hp.gender === 'Nữ' ? 'Nữ' : hp.gender}`);
+    if (hp.height) healthParts.push(`Chiều cao: ${hp.height} cm`);
+    if (hp.weight) healthParts.push(`Cân nặng: ${hp.weight} kg`);
+
+    // Tính toán chỉ số BMI nếu có đủ chiều cao và cân nặng
+    if (hp.weight && hp.height) {
+      const hM = parseFloat(hp.height) / 100;
+      const wKg = parseFloat(hp.weight);
+      if (hM > 0 && wKg > 0) {
+        const bmi = (wKg / (hM * hM)).toFixed(1);
+        let bmiDesc = 'Bình thường';
+        if (bmi < 18.5) bmiDesc = 'Thiếu cân';
+        else if (bmi <= 22.9) bmiDesc = 'Lý tưởng (chuẩn WHO Châu Á)';
+        else if (bmi <= 24.9) bmiDesc = 'Thừa cân';
+        else bmiDesc = 'Béo phì';
+        healthParts.push(`BMI: ${bmi} (${bmiDesc})`);
+      }
+    }
+
+    if (hp.goal) {
+      const goalLabels = {
+        maintain: 'Duy trì cân nặng & sức khỏe',
+        weight_loss: 'Giảm mỡ / Giảm cân',
+        muscle_gain: 'Tăng cân / Tăng cơ',
+        eat_clean: 'Ăn Eat Clean thanh lọc cơ thể',
+      };
+      healthParts.push(`Mục tiêu: ${goalLabels[hp.goal] || hp.goal}`);
+    }
+    if (hp.dietType) healthParts.push(`Chế độ ăn: ${hp.dietType}`);
+    if (hp.activityLevel) {
+      const actLabels = {
+        sedentary: 'Ít vận động (văn phòng)',
+        light: 'Vận động nhẹ (1-3 ngày/tuần)',
+        moderate: 'Vận động vừa (3-5 ngày/tuần)',
+        very_active: 'Vận động nhiều (6-7 ngày/tuần)',
+        extra_active: 'Vận động rất nhiều (VĐV/lao động nặng)',
+      };
+      healthParts.push(`Mức độ vận động: ${actLabels[hp.activityLevel] || hp.activityLevel}`);
+    }
+    if (hp.allergies?.length) healthParts.push(`Dị ứng thực phẩm: ${Array.isArray(hp.allergies) ? hp.allergies.join(', ') : hp.allergies}`);
+    if (hp.conditions?.length) healthParts.push(`Bệnh lý nền: ${Array.isArray(hp.conditions) ? hp.conditions.join(', ') : hp.conditions}`);
+
+    const healthSummary = healthParts.length > 0
+      ? healthParts.join(' | ')
+      : 'Khách hàng chưa cập nhật hồ sơ sức khỏe';
 
     // Lấy tối đa 4 lượt chat gần nhất để AI hiểu ngữ cảnh trò chuyện liên tục
     const recentChats = await AIChat.find({ user: user._id })
@@ -188,7 +229,9 @@ export const recommendFood = async (req, res) => {
     }));
 
     const systemPrompt = `Bạn là chuyên viên dinh dưỡng và chăm sóc khách hàng thông minh của FoodCare (cửa hàng đồ ăn dinh dưỡng & cá nhân hoá sức khỏe).
-Khách hàng: ${user.name || 'Quý khách'} | ${healthSummary}${unavailableNotice}
+Khách hàng: ${user.name || 'Quý khách'}
+HỒ SƠ THỂ TRẠNG & SỨC KHỎE CỦA KHÁCH HÀNG:
+${healthSummary}${unavailableNotice}
 
 THỰC ĐƠN ĐANG CÓ SẴN (CÒN HÀNG - CÓ THỂ ĐẶT MÓN):
 ${availableFoodContext}
@@ -197,14 +240,20 @@ DANH SÁCH MÓN ĐANG TẠM HẾT (HẾT HÀNG - KHÔNG THỂ ĐẶT MÓN):
 ${unavailableFoodContext}
 
 HƯỚNG DẪN XỬ LÝ THEO TỪNG LOẠI CÂU HỎI (RẤT QUAN TRỌNG):
-1. NẾU KHÁCH CHÀO HỎI / XÃ GIAO / CẢM ƠN (ví dụ: "hi", "chào shop", "hello", "shop ơi", "bạn là ai", "cảm ơn", "tạm biệt"):
+1. NẾU KHÁCH HỎI VỀ THỂ TRẠNG / CÂN NẶNG / CHIỀU CAO / SỨC KHỎE CỦA CHÍNH HỌ (ví dụ: "mình bao nhiêu kg?", "tôi nặng bao nhiêu?", "chiều cao của mình", "thể trạng của tôi thế nào", "chỉ số BMI của tôi", "tôi có bị dị ứng gì không"):
+   - Hãy trả lời chính xác, chu đáo dựa trên "HỒ SƠ THỂ TRẠNG & SỨC KHỎE CỦA KHÁCH HÀNG" ở trên.
+   - Nêu rõ số cân nặng (${hp.weight ? hp.weight + ' kg' : 'chưa cập nhật'}), chiều cao (${hp.height ? hp.height + ' cm' : 'chưa cập nhật'}), chỉ số BMI, mục tiêu và tiền sử dị ứng đã lưu.
+   - Nếu khách chưa cập nhật trường nào, nhẹ nhàng hướng dẫn khách vào trang "Hồ sơ cá nhân" (/profile) để cập nhật.
+   - Dòng cuối cùng bắt buộc: RECOMMENDATIONS: []
+
+2. NẾU KHÁCH CHÀO HỎI / XÃ GIAO / CẢM ƠN (ví dụ: "hi", "chào shop", "hello", "shop ơi", "bạn là ai", "cảm ơn", "tạm biệt"):
    - Chào lại khách hàng một cách thân thiện, nhiệt tình và lịch sự.
    - Giới thiệu bạn là trợ lý dinh dưỡng FoodCare, sẵn sàng tư vấn món ăn phù hợp với khẩu vị, chế độ ăn kiêng (giảm cân, tập gym, ăn chay, eat clean...) hoặc hỗ trợ bệnh lý (tiểu đường, huyết áp...).
    - Hỏi khách hôm nay cần tư vấn món ăn hay hỗ trợ điều gì.
    - TUYỆT ĐỐI KHÔNG tự động liệt kê danh sách món ăn khi khách chỉ mới chào hỏi hoặc chưa hỏi món!
    - Dòng cuối cùng bắt buộc: RECOMMENDATIONS: []
 
-2. NẾU KHÁCH HỎI KIỂM TRA MÓN ĂN CÒN HAY HẾT (ví dụ: "cơm khoai lang gà cải xanh còn không?", "món X còn không?"):
+3. NẾU KHÁCH HỎI KIỂM TRA MÓN ĂN CÒN HAY HẾT (ví dụ: "cơm khoai lang gà cải xanh còn không?", "món X còn không?"):
    - ĐỐI CHIẾU CHÍNH XÁC TÊN MÓN KHÁCH HỎI:
      + Chú ý phân biệt chính xác tên món, TRÁNH nhầm lẫn giữa các món có tên gần giống nhau (Ví dụ: "Cơm khoai lang gà cải xanh" là món TẠM HẾT, hoàn toàn khác biệt với món "Gà ta khoai lang cải xanh" đang CÒN HÀNG).
    - Nếu món khách hỏi nằm trong "DANH SÁCH MÓN ĐANG TẠM HẾT":
@@ -219,11 +268,11 @@ HƯỚNG DẪN XỬ LÝ THEO TỪNG LOẠI CÂU HỎI (RẤT QUAN TRỌNG):
      + Thông báo cửa hàng hiện chưa có món này trên thực đơn, gợi ý 1-2 món có sẵn phù hợp.
      + Dòng cuối cùng: RECOMMENDATIONS: [...]
 
-3. NẾU KHÁCH HỎI VỀ DỊCH VỤ / CÂU HỎI CHUNG (ví dụ: giao hàng, giờ mở cửa, cách thức đặt món, thanh toán):
+4. NẾU KHÁCH HỎI VỀ DỊCH VỤ / CÂU HỎI CHUNG (ví dụ: giao hàng, giờ mở cửa, cách thức đặt món, thanh toán):
    - Trả lời ngắn gọn, lịch sự, đúng trọng tâm và hướng dẫn khách đặt món trên website.
    - Dòng cuối cùng bắt buộc: RECOMMENDATIONS: []
 
-4. NẾU KHÁCH CẦN TƯ VẤN MÓN ĂN / DINH DƯỠNG / BỆNH LÝ / BỮA ĂN:
+5. NẾU KHÁCH CẦN TƯ VẤN MÓN ĂN / DINH DƯỠNG / BỆNH LÝ / BỮA ĂN:
    - Trả lời đúng trọng tâm câu hỏi của khách, kết hợp với hồ sơ sức khỏe nếu có.
    - CHỈ GỢI Ý các món trong "THỰC ĐƠN ĐANG CÓ SẴN" (tuyệt đối KHÔNG gợi ý món đang TẠM HẾT).
    - In đậm tên món ăn: **Tên món**, kèm lý do ngắn gọn vì sao phù hợp (calo, đạm, ít tinh bột/đường, tốt cho sức khỏe...).
