@@ -4,6 +4,7 @@ import AIChat from '../models/AIChat.js';
 import AIQuestionLog from '../models/AIQuestionLog.js';
 import Order from '../models/Order.js';
 import User from '../models/User.js';
+import Category from '../models/Category.js';
 
 const detectQuestionTopics = (text = '') => {
   const lower = text.toLowerCase();
@@ -46,7 +47,7 @@ const generateAIResponse = async (systemPrompt, conversationHistory, message) =>
   const groq = new OpenAI({
     apiKey: process.env.GROQ_API_KEY,
     baseURL: 'https://api.groq.com/openai/v1',
-    timeout: 12000,
+    timeout: 25000,
   });
 
   const invalidModels = new Set(['groq/compound-mini', 'qwen/qwen3.6-27b']);
