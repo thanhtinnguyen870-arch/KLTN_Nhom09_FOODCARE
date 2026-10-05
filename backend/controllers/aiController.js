@@ -47,7 +47,7 @@ const generateAIResponse = async (systemPrompt, conversationHistory, message) =>
   const groq = new OpenAI({
     apiKey: process.env.GROQ_API_KEY,
     baseURL: 'https://api.groq.com/openai/v1',
-    timeout: 25000,
+    timeout: 20000,
   });
 
   const invalidModels = new Set(['groq/compound-mini', 'qwen/qwen3.6-27b']);
@@ -55,14 +55,16 @@ const generateAIResponse = async (systemPrompt, conversationHistory, message) =>
   const primaryModel = (configuredModel && !invalidModels.has(configuredModel))
     ? configuredModel
     : 'qwen/qwen3.8-27b';
-  const backupModels = ['qwen/qwen3.8-27b', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'].filter((m) => m !== primaryModel);
+  const backupModels = ['openai/gpt-oss-20b', 'openai/gpt-oss-120b', 'qwen/qwen3.8-27b'].filter((m) => m !== primaryModel);
+
+  const messages = buildMessages(systemPrompt, conversationHistory, message);
 
   try {
     const completion = await groq.chat.completions.create({
       model: primaryModel,
-      messages: buildMessages(systemPrompt, conversationHistory, message),
+      messages,
       temperature: 0.3,
-      max_tokens: 1024,
+      max_tokens: 500,
     });
 
     return completion.choices[0].message.content;
@@ -74,9 +76,9 @@ const generateAIResponse = async (systemPrompt, conversationHistory, message) =>
         console.log(`Đang thử lại với Groq backup model (${backupModel})...`);
         const backupCompletion = await groq.chat.completions.create({
           model: backupModel,
-          messages: buildMessages(systemPrompt, conversationHistory, message),
+          messages,
           temperature: 0.3,
-          max_tokens: 1024,
+          max_tokens: 500,
         });
         return backupCompletion.choices[0].message.content;
       } catch (backupError) {
@@ -144,26 +146,55 @@ export const recommendFood = async (req, res) => {
     const availableFoods = allFoods.filter((f) => f.isAvailable !== false);
     const unavailableFoods = allFoods.filter((f) => f.isAvailable === false);
 
-    // Format thực đơn đang phục vụ
-    const availableFoodContext = availableFoods.map((f) => {
-      const nut = f.nutrition || {};
-      const nutStr = `~${nut.calories || '?'} kcal (Đạm: ${nut.protein ?? '?'}g, Carb: ${nut.carbs ?? '?'}g, Béo: ${nut.fat ?? '?'}g)`;
-      const ingrStr = f.ingredients?.length ? `Nguyên liệu: ${f.ingredients.join(', ')}` : '';
-      const tagsStr = f.healthTags?.length ? `Thẻ: [${f.healthTags.join(', ')}]` : '';
-      const suitStr = f.suitableFor?.length ? `Phù hợp: [${f.suitableFor.join(', ')}]` : '';
-      const warnStr = f.warningFor?.length ? `Cảnh báo: [${f.warningFor.join(', ')}]` : '';
-      const catStr = f.category?.name ? `Danh mục: ${f.category.name}` : '';
-      const rateStr = f.ratingAverage > 0 ? `★ ${f.ratingAverage.toFixed(1)}/5 (${f.ratingCount || 0} đánh giá)` : '';
-      const soldStr = f.soldCount > 0 ? `Đã bán: ${f.soldCount}` : '';
+    // Chọn lọc các món ăn liên quan nhất tới câu hỏi để tối ưu hóa tokens (< 1,200 tokens)
+    const selectRelevantFoods = (foods, query = '') => {
+      const q = query.toLowerCase().trim();
+      const isSimpleGreetingOrPersonal = /^(chào|hi|hello|ơi|alo|tôi|mình|bao nhiêu|kg|cân nặng|chiều cao|bmi|sức khỏe|dị ứng|đơn hàng|ship|mở cửa|thanh toán)/i.test(q)
+        && !/món|ăn|gợi ý|thực đơn|calo|dinh dưỡng|thành phần|protein|béo|chay|thịt|cá|bò|gà/i.test(q);
 
-      return `- ${f.name} | Giá: ${(f.price || 0).toLocaleString()}đ | ${nutStr}` +
-        `\n  ${[catStr, ingrStr, tagsStr, suitStr, warnStr, rateStr, soldStr].filter(Boolean).join(' | ')}`;
+      if (isSimpleGreetingOrPersonal) {
+        return foods.slice(0, 10);
+      }
+
+      const words = q.split(/\s+/).filter((w) => w.length > 1);
+      const scored = foods.map((food) => {
+        let score = 0;
+        const fName = (food.name || '').toLowerCase();
+        const fCat = (food.category?.name || '').toLowerCase();
+        const fTags = (food.healthTags || []).map((t) => t.toLowerCase()).join(' ');
+        const fIngs = (food.ingredients || []).map((i) => i.toLowerCase()).join(' ');
+
+        if (fName.includes(q)) score += 10;
+        for (const w of words) {
+          if (fName.includes(w)) score += 3;
+          if (fCat.includes(w)) score += 2;
+          if (fTags.includes(w)) score += 2;
+          if (fIngs.includes(w)) score += 1;
+        }
+        score += (food.soldCount || 0) * 0.01;
+        return { food, score };
+      });
+
+      scored.sort((a, b) => b.score - a.score);
+      return scored.slice(0, 20).map((s) => s.food);
+    };
+
+    const relevantFoods = selectRelevantFoods(availableFoods, message);
+
+    // Format thực đơn tinh gọn (siêu tối ưu tokens, an toàn tuyệt đối với rate limit Groq)
+    const availableFoodContext = relevantFoods.map((f) => {
+      const nut = f.nutrition || {};
+      const cal = nut.calories ? `${nut.calories}kcal` : '';
+      const p = nut.protein ? `${nut.protein}g đạm` : '';
+      const ingr = f.ingredients?.length ? `TP: ${f.ingredients.slice(0, 3).join(', ')}` : '';
+      const tags = f.healthTags?.length ? `[${f.healthTags.slice(0, 2).join(', ')}]` : '';
+      return `• ${f.name} (${Math.round((f.price || 0) / 1000)}k, ${cal}${p ? ', ' + p : ''}) ${tags} ${ingr}`.trim();
     }).join('\n');
 
-    // Format danh sách món tạm hết
+    // Format danh sách món tạm hết gọn gàng
     const unavailableFoodContext = unavailableFoods.length > 0
-      ? unavailableFoods.map((f) => `- ${f.name} [TẠM HẾT / HẾT HÀNG]`).join('\n')
-      : '(Hiện tại không có món nào tạm hết)';
+      ? unavailableFoods.map((f) => f.name).join(', ')
+      : 'Không có món nào tạm hết';
 
     // Nhận diện nhanh nếu khách hỏi đích danh món đang tạm hết
     const removeAccents = (str = '') =>
@@ -266,16 +297,16 @@ export const recommendFood = async (req, res) => {
       }).join('\n')
       : 'Khách hàng chưa có đơn hàng nào gần đây.';
 
-    // 4. LẤY LỊCH SỬ CHAT GẦN NHẤT
+    // 4. LẤY LỊCH SỬ CHAT GẦN NHẤT (Rút gọn tối đa 2 lượt để tránh phình token)
     const recentChats = await AIChat.find({ user: user._id })
       .sort({ createdAt: -1 })
-      .limit(4)
+      .limit(2)
       .lean();
     recentChats.reverse();
 
     const conversationHistory = recentChats.map((c) => ({
-      user: c.message,
-      assistant: c.response,
+      user: c.message ? String(c.message).slice(0, 150) : '',
+      assistant: c.response ? String(c.response).slice(0, 250) : '',
     }));
 
     // 5. SYSTEM PROMPT TOÀN DIỆN CỦA HỆ THỐNG FOODCARE
@@ -359,9 +390,22 @@ QUY TẮC BẮT BUỘC:
       aiResponseText = await generateAIResponse(systemPrompt, conversationHistory, message);
     } catch (apiError) {
       console.warn('AI API Error (Fallback triggered):', apiError.message);
-      const fallbackFoods = availableFoods.slice(0, 3);
-      const fallbackNames = fallbackFoods.map(f => f.name);
-      aiResponseText = `Máy chủ AI tạm thời quá tải. Gợi ý nhanh cho bạn:\n\n${fallbackFoods.map(f => `- **${f.name}**`).join('\n')}\n\n⚠️ Tham khảo bác sĩ trước khi thay đổi chế độ ăn.\nRECOMMENDATIONS: ${JSON.stringify(fallbackNames)}`;
+      const lowerMsg = message.toLowerCase();
+      if (/cân nặng|chiều cao|bao nhiêu kg|thể trạng|bmi|hồ sơ/i.test(lowerMsg)) {
+        if (hp.weight || hp.height) {
+          aiResponseText = `Theo hồ sơ sức khỏe của bạn:\n• ${healthSummary}.\n\nBạn có thể cập nhật thông tin trong trang Hồ sơ cá nhân bất cứ lúc nào!\nRECOMMENDATIONS: []`;
+        } else {
+          aiResponseText = `Bạn chưa cập nhật thông tin chiều cao và cân nặng trong hồ sơ sức khỏe. Vui lòng vào trang Hồ sơ cá nhân để cập nhật nhé!\nRECOMMENDATIONS: []`;
+        }
+      } else if (/đơn hàng|order|vận chuyển|giao hàng|shipper|ship/i.test(lowerMsg)) {
+        aiResponseText = `Thông tin đơn hàng của bạn:\n${recentOrdersContext}\nRECOMMENDATIONS: []`;
+      } else if (/chào|hi|hello|ơi|alo/i.test(lowerMsg)) {
+        aiResponseText = `Xin chào bạn! Tôi là Trợ lý Dinh dưỡng & Sức khỏe của FoodCare. Tôi có thể hỗ trợ gì cho thực đơn và sức khỏe của bạn hôm nay?\nRECOMMENDATIONS: []`;
+      } else {
+        const fallbackFoods = availableFoods.slice(0, 3);
+        const fallbackNames = fallbackFoods.map((f) => f.name);
+        aiResponseText = `Gợi ý thực đơn dinh dưỡng hôm nay cho bạn:\n\n${fallbackFoods.map((f) => `- **${f.name}** (${(f.price || 0).toLocaleString('vi-VN')}đ)`).join('\n')}\n\n⚠️ Tham khảo bác sĩ trước khi thay đổi chế độ ăn.\nRECOMMENDATIONS: ${JSON.stringify(fallbackNames)}`;
+      }
     }
 
     const { responseMessage, recommendedFoodNames } = extractRecommendedFoodNames(aiResponseText);
