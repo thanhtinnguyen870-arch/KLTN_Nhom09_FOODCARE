@@ -16,8 +16,8 @@ const whyFeatures = [
   },
   {
     icon: <Bot size={28} />,
-    color: 'from-primary to-orange-400',
-    bg: 'bg-orange-50',
+    color: 'from-primary to-emerald-400',
+    bg: 'bg-emerald-50',
     title: 'AI tư vấn thông minh',
     desc: 'Hệ thống AI phân tích tình trạng sức khỏe và gợi ý thực đơn phù hợp nhất cho từng người.',
   },
@@ -74,10 +74,10 @@ const Home = () => {
       <Hero3D />
 
       {/* ========== WHY FOODCARE SECTION ========== */}
-      <section className="py-20 px-6 md:px-16 bg-gradient-to-b from-white to-orange-50/40">
+      <section className="py-20 px-6 md:px-16 bg-gradient-to-b from-white to-[#F0F8F3]/50">
         <div className="container mx-auto max-w-6xl">
           <div className="text-center mb-14">
-            <span className="inline-block bg-orange-100 text-primary text-xs font-bold uppercase tracking-widest px-4 py-1.5 rounded-full mb-4">
+            <span className="inline-block bg-[#E8F5EE] text-primary text-xs font-bold uppercase tracking-widest px-4 py-1.5 rounded-full mb-4">
               Tại sao chọn chúng tôi?
             </span>
             <h2 className="text-4xl md:text-5xl font-extrabold text-dark leading-tight">
@@ -110,7 +110,7 @@ const Home = () => {
       <section className="px-6 py-20 md:px-16 bg-white">
         <div className="container mx-auto max-w-6xl">
           <div className="mb-12 text-center">
-            <span className="inline-block bg-orange-100 text-primary text-xs font-bold uppercase tracking-widest px-4 py-1.5 rounded-full mb-4">
+            <span className="inline-block bg-[#E8F5EE] text-primary text-xs font-bold uppercase tracking-widest px-4 py-1.5 rounded-full mb-4">
               Trợ lý AI
             </span>
             <h2 className="mb-3 text-4xl font-extrabold text-dark">
@@ -122,14 +122,14 @@ const Home = () => {
 
           <div className="flex flex-col gap-10 md:flex-row items-start">
             {/* AI Chat Preview */}
-            <div className="glassmorphism relative flex-1 overflow-hidden rounded-3xl p-6 shadow-3d">
+            <div className="glassmorphism relative flex-1 overflow-hidden rounded-3xl p-6 shadow-3d border border-[#E8EEE9]">
               <div className="mb-6 flex items-center gap-3">
-                <div className="h-10 w-10 rounded-full bg-gradient-to-br from-primary to-orange-400 flex items-center justify-center font-bold text-white shadow-md">
+                <div className="h-10 w-10 rounded-full bg-gradient-to-br from-primary to-emerald-400 flex items-center justify-center font-bold text-white shadow-md">
                   FC
                 </div>
                 <div>
                   <h4 className="font-bold text-dark">FoodCare Assistant</h4>
-                  <p className="text-xs text-emerald-500 flex items-center gap-1">
+                  <p className="text-xs text-emerald-600 flex items-center gap-1 font-medium">
                     <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full inline-block animate-pulse" />
                     Online
                   </p>
@@ -138,20 +138,20 @@ const Home = () => {
 
               <div className="mb-6 space-y-4">
                 <div className="flex justify-end">
-                  <div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-gray-100 px-4 py-3 text-sm">
+                  <div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-gray-100 px-4 py-3 text-sm text-[#17231D]">
                     Tôi bị tiểu đường, nên ăn gì?
                   </div>
                 </div>
                 <div className="flex justify-start">
-                  <div className="max-w-[85%] rounded-2xl rounded-tl-sm border border-orange-200 bg-orange-50 px-4 py-3 text-orange-900 text-sm leading-relaxed">
-                    Chào bạn! Với người bị tiểu đường, bạn nên ưu tiên món ít đường, giàu chất xơ và protein. Tôi gợi ý <b>Salad ức gà rau củ</b> hoặc <b>Cá hồi áp chảo</b> nhé! 🥗
+                  <div className="max-w-[85%] rounded-2xl rounded-tl-sm border border-[#E8EEE9] bg-[#F0F8F3] px-4 py-3 text-[#17231D] text-sm leading-relaxed">
+                    Chào bạn! Với người bị tiểu đường, bạn nên ưu tiên món ít đường, giàu chất xơ và protein. Tôi gợi ý <b className="text-primary">Salad ức gà rau củ</b> hoặc <b className="text-primary">Cá hồi áp chảo</b> nhé! 🥗
                   </div>
                 </div>
               </div>
 
               <Link
                 to="/ai-recommend"
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-2.5 font-semibold text-white shadow-md transition-all hover:bg-orange-600 hover:-translate-y-0.5"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-2.5 font-semibold text-white shadow-md transition-all hover:bg-primary-dark hover:-translate-y-0.5"
               >
                 <Bot size={18} /> Tư vấn ngay
               </Link>
@@ -166,7 +166,7 @@ const Home = () => {
                     type="button"
                     onClick={goPrev}
                     disabled={!canSlide}
-                    className="flex h-9 w-9 items-center justify-center rounded-full border border-orange-200 bg-white text-primary shadow-sm transition-colors hover:bg-orange-50 disabled:opacity-40"
+                    className="flex h-9 w-9 items-center justify-center rounded-full border border-[#E8EEE9] bg-white text-primary shadow-sm transition-colors hover:bg-primary-light disabled:opacity-40"
                     aria-label="Món trước"
                   >
                     <ChevronLeft size={18} />
@@ -175,7 +175,7 @@ const Home = () => {
                     type="button"
                     onClick={goNext}
                     disabled={!canSlide}
-                    className="flex h-9 w-9 items-center justify-center rounded-full border border-orange-200 bg-white text-primary shadow-sm transition-colors hover:bg-orange-50 disabled:opacity-40"
+                    className="flex h-9 w-9 items-center justify-center rounded-full border border-[#E8EEE9] bg-white text-primary shadow-sm transition-colors hover:bg-primary-light disabled:opacity-40"
                     aria-label="Món tiếp theo"
                   >
                     <ChevronRight size={18} />
@@ -209,6 +209,8 @@ const Home = () => {
                             event.currentTarget.src = fallbackImage;
                           }}
                           alt={food.name}
+                          loading="lazy"
+                          decoding="async"
                           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
                         />
                       </div>
@@ -233,7 +235,7 @@ const Home = () => {
       {/* ========== CTA BANNER ========== */}
       <section className="py-20 px-6 md:px-16">
         <div className="container mx-auto max-w-4xl">
-          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-primary via-orange-500 to-amber-400 p-10 md:p-14 text-center shadow-float">
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-primary via-primary-dark to-primary p-10 md:p-14 text-center shadow-float">
             <div className="absolute -top-12 -left-12 w-40 h-40 rounded-full bg-white/10" />
             <div className="absolute -bottom-10 -right-10 w-52 h-52 rounded-full bg-white/10" />
             <div className="relative z-10">

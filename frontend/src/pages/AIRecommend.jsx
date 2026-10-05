@@ -56,7 +56,7 @@ const AIRecommend = () => {
           <div className="blob bg-blue-300/15 w-80 h-80 rounded-full bottom-10 right-20" />
         </div>
         <div className="text-center max-w-md">
-          <div className="w-28 h-28 rounded-full bg-orange-50 flex items-center justify-center mx-auto mb-6 shadow-lg">
+          <div className="w-28 h-28 rounded-full bg-primary-light flex items-center justify-center mx-auto mb-6 shadow-lg">
             <Bot size={56} className="text-primary" />
           </div>
           <h1 className="text-3xl font-bold text-dark mb-3">Tư vấn Ẩm thực AI</h1>
@@ -67,13 +67,13 @@ const AIRecommend = () => {
             <Link
               to="/login"
               state={{ from: '/ai-recommend' }}
-              className="bg-primary text-white px-8 py-3 rounded-full font-bold shadow-lg hover:bg-orange-600 transition-all hover:-translate-y-1"
+              className="bg-primary text-white px-8 py-3 rounded-full font-bold shadow-lg hover:bg-primary-dark transition-all hover:-translate-y-1"
             >
               Đăng nhập ngay
             </Link>
             <Link
               to="/register"
-              className="border border-primary text-primary px-8 py-3 rounded-full font-bold hover:bg-orange-50 transition-all hover:-translate-y-1"
+              className="border border-primary/40 text-primary px-8 py-3 rounded-full font-bold hover:bg-primary-light transition-all hover:-translate-y-1"
             >
               Đăng ký miễn phí
             </Link>
@@ -123,7 +123,17 @@ const AIRecommend = () => {
       setChatHistory(prev => prev.map(c => c._id === newMsg._id ? data : c));
     } catch (error) {
       console.error(error);
-      setChatHistory(prev => prev.map(c => c._id === newMsg._id ? { ...c, response: 'Xin lỗi, đã có lỗi xảy ra khi kết nối.' } : c));
+      let errorMessage = 'Xin lỗi, máy chủ AI đang bận hoặc phản hồi chậm. Vui lòng thử lại sau giây lát.';
+      if (error.response?.status === 401) {
+        errorMessage = 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại để tiếp tục tư vấn.';
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        errorMessage = 'Yêu cầu vượt quá thời gian chờ (timeout). Vui lòng thử lại với câu hỏi ngắn hơn.';
+      } else if (!error.response) {
+        errorMessage = 'Không thể kết nối đến máy chủ. Vui lòng kiểm tra lại kết nối mạng.';
+      }
+      setChatHistory(prev => prev.map(c => c._id === newMsg._id ? { ...c, response: errorMessage } : c));
     } finally {
       setLoading(false);
     }
@@ -168,7 +178,7 @@ const AIRecommend = () => {
                 <div className="w-10 h-10 rounded-full bg-primary flex-shrink-0 flex items-center justify-center text-white shadow-md">
                   <Bot size={20} />
                 </div>
-                <div className="bg-orange-50 text-gray-800 border border-orange-100 p-4 rounded-2xl rounded-tl-sm max-w-[85%] shadow-sm">
+                <div className="bg-white text-gray-800 border border-[#E8EEE9] p-4 rounded-2xl rounded-tl-sm max-w-[85%] shadow-sm">
                   {chat.isTemporary && !chat.response ? (
                     <div className="flex space-x-2 items-center h-6">
                       <div className="w-2 h-2 bg-primary rounded-full animate-bounce"></div>
@@ -183,8 +193,8 @@ const AIRecommend = () => {
 
                   {/* Recommended Foods inside chat bubble */}
                   {chat.recommendedFoods && chat.recommendedFoods.length > 0 && (
-                    <div className="mt-6 border-t border-orange-200 pt-4">
-                      <p className="font-semibold mb-3 text-orange-800">Món ăn đề xuất từ FoodCare:</p>
+                    <div className="mt-6 border-t border-[#E8EEE9] pt-4">
+                      <p className="font-bold mb-3 text-primary">Món ăn đề xuất từ FoodCare:</p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {chat.recommendedFoods.map((food) => (
                           <Link to={`/food/${food._id}`} key={food._id} className="bg-white rounded-xl shadow p-3 flex gap-3 hover:-translate-y-1 transition-transform border border-gray-100">
@@ -234,7 +244,7 @@ const AIRecommend = () => {
             <button 
               type="submit"
               disabled={loading || !message.trim()}
-              className="w-12 h-12 bg-primary text-white rounded-full flex items-center justify-center hover:bg-orange-600 transition-colors disabled:opacity-50"
+              className="w-12 h-12 bg-primary text-white rounded-full flex items-center justify-center hover:bg-primary-dark transition-colors disabled:opacity-50"
             >
               <Send size={20} />
             </button>

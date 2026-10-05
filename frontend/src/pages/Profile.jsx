@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, Navigate, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Activity,
   Camera,
@@ -16,10 +16,19 @@ import {
   Gift,
   Crown,
   Diamond,
+  Search,
+  RotateCcw,
+  ShoppingCart,
+  ShieldAlert,
+  Sparkles,
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { useAuth } from '../context/AuthContext';
+import { useCart } from '../context/CartContext';
 import axiosClient from '../api/axiosClient';
+import { toast } from 'react-toastify';
+import NutritionTargetCard from '../components/NutritionTargetCard';
+import { ACTIVITY_LEVELS, GOALS, COMMON_ALLERGIES } from '../utils/nutritionCalculator';
 
 const orderSteps = [
   { key: 'pending', label: 'Chờ xác nhận', icon: Clock },
@@ -58,22 +67,30 @@ const getOrderUserId = (order) => {
 
 const Profile = () => {
   const { user, updateUser } = useAuth();
+  const { reorder } = useCart();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const fileInputRef = useRef(null);
-  const initialTab = ['health', 'tracking', 'history'].includes(searchParams.get('tab')) ? searchParams.get('tab') : 'health';
+  const initialTab = ['info', 'health', 'offers', 'tracking', 'history'].includes(searchParams.get('tab')) ? searchParams.get('tab') : 'health';
   const [activeTab, setActiveTab] = useState(initialTab);
   const [editing, setEditing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [orders, setOrders] = useState([]);
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [historyFilter, setHistoryFilter] = useState('all');
-  const [message, setMessage] = useState('');
+  const [historySearch, setHistorySearch] = useState('');
+  const [trackingSearch, setTrackingSearch] = useState('');
+  const setMessage = (msg) => toast.info(msg);
   const [healthData, setHealthData] = useState({
     age: user?.healthProfile?.age || '',
+    gender: user?.healthProfile?.gender || 'male',
     weight: user?.healthProfile?.weight || '',
     height: user?.healthProfile?.height || '',
+    activityLevel: user?.healthProfile?.activityLevel || 'sedentary',
+    goal: user?.healthProfile?.goal || 'maintain',
+    dietType: user?.healthProfile?.dietType || 'Bình thường',
+    allergies: user?.healthProfile?.allergies?.join(', ') || '',
     conditions: user?.healthProfile?.conditions?.join(', ') || '',
-    goal: user?.healthProfile?.goal || '',
   });
   const [infoData, setInfoData] = useState({
     name: user?.name || '',
@@ -90,15 +107,32 @@ const Profile = () => {
     const syncHealthData = setTimeout(() => {
       setHealthData({
         age: user?.healthProfile?.age || '',
+        gender: user?.healthProfile?.gender || 'male',
         weight: user?.healthProfile?.weight || '',
         height: user?.healthProfile?.height || '',
+        activityLevel: user?.healthProfile?.activityLevel || 'sedentary',
+        goal: user?.healthProfile?.goal || 'maintain',
+        dietType: user?.healthProfile?.dietType || 'Bình thường',
+        allergies: user?.healthProfile?.allergies?.join(', ') || '',
         conditions: user?.healthProfile?.conditions?.join(', ') || '',
-        goal: user?.healthProfile?.goal || '',
       });
     }, 0);
 
     return () => clearTimeout(syncHealthData);
   }, [user?.healthProfile]);
+
+  // Đồng bộ thông tin cá nhân khi user thay đổi (sau khi lưu hoặc quay lại trang)
+  useEffect(() => {
+    const syncInfoData = setTimeout(() => {
+      setInfoData({
+        name: user?.name || '',
+        phone: user?.phone || '',
+        address: user?.address || '',
+      });
+    }, 0);
+
+    return () => clearTimeout(syncInfoData);
+  }, [user?.name, user?.phone, user?.address]);
 
   useEffect(() => {
     if (!user) return;
@@ -167,11 +201,47 @@ const Profile = () => {
     [orders]
   );
 
+  const cleanTrackingSearchQuery = useMemo(
+    () => trackingSearch.trim().toLowerCase().replace(/^#/, ''),
+    [trackingSearch]
+  );
+
+  const filteredTrackingOrders = useMemo(() => {
+    if (!cleanTrackingSearchQuery) return trackingOrders;
+    return trackingOrders.filter(
+      (order) =>
+        order._id.toLowerCase().includes(cleanTrackingSearchQuery) ||
+        order._id.slice(-8).toLowerCase().includes(cleanTrackingSearchQuery) ||
+        order.items.some((item) => item.name.toLowerCase().includes(cleanTrackingSearchQuery))
+    );
+  }, [trackingOrders, cleanTrackingSearchQuery]);
+
+  const cleanSearchQuery = useMemo(
+    () => historySearch.trim().toLowerCase().replace(/^#/, ''),
+    [historySearch]
+  );
+
   const historyOrders = useMemo(() => {
     const finished = orders.filter((order) => ['completed', 'cancelled'].includes(order.orderStatus));
-    if (historyFilter === 'all') return finished;
-    return finished.filter((order) => order.orderStatus === historyFilter);
-  }, [orders, historyFilter]);
+    const filtered = historyFilter === 'all' ? finished : finished.filter((order) => order.orderStatus === historyFilter);
+    if (!cleanSearchQuery) return filtered;
+    return filtered.filter(
+      (order) =>
+        order._id.toLowerCase().includes(cleanSearchQuery) ||
+        order._id.slice(-8).toLowerCase().includes(cleanSearchQuery) ||
+        order.items.some((item) => item.name.toLowerCase().includes(cleanSearchQuery))
+    );
+  }, [orders, historyFilter, cleanSearchQuery]);
+
+  const matchedInTracking = useMemo(() => {
+    if (!cleanSearchQuery) return null;
+    return trackingOrders.find(
+      (order) =>
+        order._id.toLowerCase().includes(cleanSearchQuery) ||
+        order._id.slice(-8).toLowerCase().includes(cleanSearchQuery) ||
+        order.items.some((item) => item.name.toLowerCase().includes(cleanSearchQuery))
+    );
+  }, [trackingOrders, cleanSearchQuery]);
 
   if (!user) {
     return <Navigate to="/login" replace />;
@@ -180,19 +250,28 @@ const Profile = () => {
   const handleUpdate = async (event) => {
     event.preventDefault();
 
-    if (!healthData.age || !healthData.weight || !healthData.height || !healthData.goal) {
-      setMessage('Vui lòng nhập tuổi, cân nặng, chiều cao và mục tiêu.');
+    if (!healthData.age || !healthData.weight || !healthData.height) {
+      setMessage('Vui lòng nhập tuổi, cân nặng và chiều cao.');
       return;
     }
 
     try {
-      const conditions = healthData.conditions.split(',').map((item) => item.trim()).filter(Boolean);
-      const { data } = await axiosClient.put('/auth/health-profile', {
+      const conditions = healthData.conditions
+        ? healthData.conditions.split(',').map((item) => item.trim()).filter(Boolean)
+        : [];
+      const allergies = healthData.allergies
+        ? healthData.allergies.split(',').map((item) => item.trim()).filter(Boolean)
+        : [];
+
+      const payload = {
         ...healthData,
         conditions,
-      });
+        allergies,
+      };
+
+      const { data } = await axiosClient.put('/auth/health-profile', payload);
       updateUser({ healthProfile: data });
-      setMessage('Đã cập nhật hồ sơ sức khỏe.');
+      setMessage('Đã cập nhật hồ sơ sức khỏe và tự động tính toán lại chỉ số dinh dưỡng.');
       setEditing(false);
     } catch {
       setMessage('Cập nhật hồ sơ sức khỏe thất bại.');
@@ -253,6 +332,11 @@ const Profile = () => {
     }
   };
 
+  const handleReorder = (orderItems) => {
+    reorder(orderItems);
+    navigate('/cart');
+  };
+
   const handleUpdateInfo = async (event) => {
     event.preventDefault();
     try {
@@ -290,7 +374,7 @@ const Profile = () => {
             </div>
             <h2 className="text-2xl font-bold">{user?.name}</h2>
             <p className="mb-6 text-gray-500">{user?.email}</p>
-            <div className="inline-flex items-center gap-2 rounded-full bg-orange-50 px-4 py-2 text-sm font-semibold text-primary">
+            <div className="inline-flex items-center gap-2 rounded-full bg-primary-light/50 px-4 py-2 text-sm font-semibold text-primary">
               <User size={16} />
               {user?.role === 'admin' ? 'Quản trị viên' : 'Thành viên'}
             </div>
@@ -322,14 +406,6 @@ const Profile = () => {
         </aside>
 
         <main className="space-y-5">
-          {message && (
-            <div className="flex items-center justify-between rounded-2xl border border-gray-100 bg-white p-4 text-sm font-semibold text-gray-700 shadow-sm">
-              <span>{message}</span>
-              <button onClick={() => setMessage('')} className="text-gray-400 hover:text-gray-700">
-                <XCircle size={18} />
-              </button>
-            </div>
-          )}
 
           {activeTab === 'info' && (
             <>
@@ -359,7 +435,7 @@ const Profile = () => {
                       </label>
                     </div>
                   </div>
-                  <button type="submit" className="rounded-xl bg-primary px-6 py-2 font-bold text-white transition-colors hover:bg-orange-600">
+                  <button type="submit" className="rounded-xl bg-primary px-6 py-2 font-bold text-white transition-colors hover:bg-primary-dark shadow-md shadow-primary-light">
                     Lưu thông tin
                   </button>
                 </form>
@@ -381,51 +457,251 @@ const Profile = () => {
           )}
 
           {activeTab === 'health' && (
-            <section className="rounded-3xl border border-gray-100 bg-white p-8 shadow-3d">
-              <div className="mb-6 flex items-center justify-between border-b pb-4">
-                <h3 className="flex items-center gap-2 text-2xl font-bold text-dark">
-                  <Activity className="text-primary" />
-                  Hồ sơ sức khỏe
-                </h3>
-                <button onClick={() => setEditing(!editing)} className="flex items-center gap-1 font-medium text-gray-500 transition-colors hover:text-primary">
-                  {editing ? <><Save size={18} /> Đang sửa</> : <><Edit3 size={18} /> Cập nhật</>}
-                </button>
-              </div>
+            <div className="space-y-6">
+              {/* Card Dinh dưỡng TDEE / BMR & Macro Targets */}
+              <NutritionTargetCard healthProfile={user?.healthProfile} />
 
-              {editing ? (
-                <form onSubmit={handleUpdate} className="space-y-4">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <HealthInput label="Tuổi" value={healthData.age} onChange={(value) => setHealthData({ ...healthData, age: value })} required type="number" />
-                    <HealthInput label="Cân nặng (kg)" value={healthData.weight} onChange={(value) => setHealthData({ ...healthData, weight: value })} required type="number" />
-                    <HealthInput label="Chiều cao (cm)" value={healthData.height} onChange={(value) => setHealthData({ ...healthData, height: value })} required type="number" />
-                    <HealthInput label="Mục tiêu" value={healthData.goal} onChange={(value) => setHealthData({ ...healthData, goal: value })} required />
+              {/* Form / Chi tiết Hồ sơ sức khỏe */}
+              <section className="rounded-3xl border border-gray-100 bg-white p-8 shadow-3d">
+                <div className="mb-6 flex items-center justify-between border-b pb-4">
+                  <div>
+                    <h3 className="flex items-center gap-2 text-2xl font-bold text-dark">
+                      <Activity className="text-primary" />
+                      Thông Số Thể Trạng & Hồ Sơ Dinh Dưỡng
+                    </h3>
+                    <p className="text-xs text-gray-500 mt-0.5">Dữ liệu được bảo mật và dùng để cá nhân hóa thực đơn & cảnh báo an toàn</p>
                   </div>
-                  <label className="block">
-                    <span className="mb-1 block text-sm font-semibold text-gray-700">Bệnh lý hoặc lưu ý dinh dưỡng</span>
-                    <textarea
-                      rows="3"
-                      placeholder="Ví dụ: Tiểu đường, cao huyết áp, dị ứng hải sản..."
-                      className="w-full rounded-xl border px-4 py-2 outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                      value={healthData.conditions}
-                      onChange={(event) => setHealthData({ ...healthData, conditions: event.target.value })}
-                    />
-                  </label>
-                  <button type="submit" className="rounded-xl bg-primary px-6 py-2 font-bold text-white transition-colors hover:bg-orange-600">
-                    Lưu thay đổi
+                  <button
+                    onClick={() => setEditing(!editing)}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold border border-gray-200 transition-colors hover:border-primary hover:text-primary"
+                  >
+                    {editing ? <><Save size={16} /> Đang sửa</> : <><Edit3 size={16} /> Cập nhật hồ sơ</>}
                   </button>
-                </form>
-              ) : (
-                <div className="grid gap-6 md:grid-cols-2">
-                  <ProfileInfo label="Tuổi" value={healthData.age ? `${healthData.age} tuổi` : 'Chưa cập nhật'} />
-                  <ProfileInfo label="Chỉ số cơ thể" value={healthData.weight && healthData.height ? `${healthData.weight}kg / ${healthData.height}cm` : 'Chưa cập nhật'} />
-                  <ProfileInfo label="Mục tiêu sức khỏe" value={healthData.goal || 'Chưa cập nhật'} />
-                  <ProfileInfo label="Lưu ý bệnh lý" value={healthData.conditions || 'Không có'} tone="red" />
-                  <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800 md:col-span-2">
-                    <b>Lưu ý:</b> Hồ sơ sức khỏe giúp FoodCare gợi ý món phù hợp hơn với mục tiêu và tình trạng cá nhân của bạn.
-                  </div>
                 </div>
-              )}
-            </section>
+
+                {editing ? (
+                  <form onSubmit={handleUpdate} className="space-y-5">
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <HealthInput
+                        label="Tuổi"
+                        value={healthData.age}
+                        onChange={(value) => setHealthData({ ...healthData, age: value })}
+                        required
+                        type="number"
+                      />
+                      <HealthInput
+                        label="Cân nặng (kg)"
+                        value={healthData.weight}
+                        onChange={(value) => setHealthData({ ...healthData, weight: value })}
+                        required
+                        type="number"
+                      />
+                      <HealthInput
+                        label="Chiều cao (cm)"
+                        value={healthData.height}
+                        onChange={(value) => setHealthData({ ...healthData, height: value })}
+                        required
+                        type="number"
+                      />
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="block">
+                        <span className="mb-1 block text-sm font-semibold text-gray-700">Giới tính sinh học</span>
+                        <select
+                          value={healthData.gender}
+                          onChange={(e) => setHealthData({ ...healthData, gender: e.target.value })}
+                          className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                        >
+                          <option value="male">Nam (Male)</option>
+                          <option value="female">Nữ (Female)</option>
+                        </select>
+                      </label>
+
+                      <label className="block">
+                        <span className="mb-1 block text-sm font-semibold text-gray-700">Mức độ vận động thể chất</span>
+                        <select
+                          value={healthData.activityLevel}
+                          onChange={(e) => setHealthData({ ...healthData, activityLevel: e.target.value })}
+                          className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                        >
+                          {ACTIVITY_LEVELS.map((act) => (
+                            <option key={act.value} value={act.value}>
+                              {act.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="block">
+                        <span className="mb-1 block text-sm font-semibold text-gray-700">Mục tiêu dinh dưỡng</span>
+                        <select
+                          value={healthData.goal}
+                          onChange={(e) => setHealthData({ ...healthData, goal: e.target.value })}
+                          className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                        >
+                          {GOALS.map((g) => (
+                            <option key={g.value} value={g.value}>
+                              {g.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label className="block">
+                        <span className="mb-1 block text-sm font-semibold text-gray-700">Chế độ ăn ưa thích</span>
+                        <select
+                          value={healthData.dietType}
+                          onChange={(e) => setHealthData({ ...healthData, dietType: e.target.value })}
+                          className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                        >
+                          <option value="Bình thường">Bình thường (Đa dạng)</option>
+                          <option value="Ăn chay">Ăn chay (Vegetarian)</option>
+                          <option value="Eat clean">Eat Clean / Healthy</option>
+                          <option value="Low carb / Keto">Low Carb / Keto</option>
+                          <option value="Tiểu đường">Thực đơn cho người tiểu đường</option>
+                        </select>
+                      </label>
+                    </div>
+
+                    {/* Dị ứng thực phẩm */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="block text-sm font-semibold text-gray-700">
+                          Dị ứng thực phẩm (Hệ thống sẽ tự động cảnh báo khi thêm món vào giỏ)
+                        </span>
+                        <span className="text-xs text-rose-500 font-medium flex items-center gap-1">
+                          <ShieldAlert size={14} /> Tự động cảnh báo
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="Nhập dị ứng (phân tách bằng dấu phẩy, ví dụ: Tôm, Đậu phộng...)"
+                        className="w-full rounded-xl border px-4 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                        value={healthData.allergies}
+                        onChange={(e) => setHealthData({ ...healthData, allergies: e.target.value })}
+                      />
+                      {/* Gợi ý bấm nhanh */}
+                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                        <span className="text-[11px] text-gray-400">Chọn nhanh:</span>
+                        {COMMON_ALLERGIES.map((item) => {
+                          const isSelected = healthData.allergies.toLowerCase().includes(item.toLowerCase().split(' ')[0]);
+                          return (
+                            <button
+                              type="button"
+                              key={item}
+                              onClick={() => {
+                                const current = healthData.allergies ? healthData.allergies.split(',').map((s) => s.trim()).filter(Boolean) : [];
+                                if (!current.includes(item)) {
+                                  setHealthData({ ...healthData, allergies: [...current, item].join(', ') });
+                                }
+                              }}
+                              className={`text-[11px] px-2.5 py-1 rounded-lg border transition-all ${
+                                isSelected
+                                  ? 'bg-rose-500 text-white border-rose-500 font-semibold'
+                                  : 'bg-gray-50 hover:bg-rose-50 text-gray-600 border-gray-200'
+                              }`}
+                            >
+                              + {item}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Bệnh lý hoặc lưu ý dinh dưỡng */}
+                    <label className="block">
+                      <span className="mb-1 block text-sm font-semibold text-gray-700">Bệnh lý nền hoặc lưu ý y tế</span>
+                      <textarea
+                        rows="2"
+                        placeholder="Ví dụ: Tiểu đường type 2, cao huyết áp, đau dạ dày, gout..."
+                        className="w-full rounded-xl border px-4 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                        value={healthData.conditions}
+                        onChange={(event) => setHealthData({ ...healthData, conditions: event.target.value })}
+                      />
+                    </label>
+
+                    <div className="pt-2 flex gap-3">
+                      <button
+                        type="submit"
+                        className="rounded-xl bg-primary px-6 py-2.5 font-bold text-white transition-colors hover:bg-primary-dark shadow-md shadow-primary-light"
+                      >
+                        Lưu và Tính toán lại chỉ số
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditing(false)}
+                        className="rounded-xl border border-gray-200 px-5 py-2.5 font-medium text-gray-600 hover:bg-gray-50"
+                      >
+                        Hủy
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="space-y-6">
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <ProfileInfo
+                        label="Tuổi & Giới tính"
+                        value={healthData.age ? `${healthData.age} tuổi (${healthData.gender === 'female' ? 'Nữ' : 'Nam'})` : 'Chưa cập nhật'}
+                      />
+                      <ProfileInfo
+                        label="Chỉ số cơ thể"
+                        value={healthData.weight && healthData.height ? `${healthData.weight}kg / ${healthData.height}cm` : 'Chưa cập nhật'}
+                      />
+                      <ProfileInfo
+                        label="Mức độ vận động"
+                        value={ACTIVITY_LEVELS.find((a) => a.value === healthData.activityLevel)?.label || 'Ít vận động'}
+                      />
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <ProfileInfo
+                        label="Mục tiêu sức khỏe"
+                        value={GOALS.find((g) => g.value === healthData.goal)?.label || healthData.goal || 'Duy trì cân nặng'}
+                      />
+                      <ProfileInfo
+                        label="Chế độ ăn ưa chuộng"
+                        value={healthData.dietType || 'Bình thường'}
+                      />
+                    </div>
+
+                    {/* Dị ứng */}
+                    <div className="p-4 rounded-2xl bg-rose-50/70 border border-rose-200/80">
+                      <div className="flex items-center gap-2 text-rose-700 font-bold text-sm mb-2">
+                        <ShieldAlert size={18} />
+                        Dị ứng thực phẩm đăng ký:
+                      </div>
+                      {user?.healthProfile?.allergies?.length ? (
+                        <div className="flex flex-wrap gap-2">
+                          {user.healthProfile.allergies.map((alg, idx) => (
+                            <span
+                              key={idx}
+                              className="px-3 py-1 rounded-full text-xs font-bold bg-white text-rose-700 border border-rose-200 shadow-sm"
+                            >
+                              ⚠️ {alg}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-rose-600">Bạn chưa đăng ký danh mục dị ứng nào. Nhấn "Cập nhật hồ sơ" để thêm.</p>
+                      )}
+                    </div>
+
+                    {/* Bệnh lý */}
+                    <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200/80">
+                      <p className="text-xs font-bold text-amber-800 uppercase tracking-wider mb-1">Bệnh lý nền / Lưu ý dinh dưỡng:</p>
+                      <p className="text-sm font-medium text-amber-900">
+                        {user?.healthProfile?.conditions?.length
+                          ? user.healthProfile.conditions.join(', ')
+                          : 'Không có lưu ý đặc biệt'}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </section>
+            </div>
           )}
 
           {activeTab === 'offers' && (
@@ -513,40 +789,133 @@ const Profile = () => {
           )}
 
           {activeTab === 'tracking' && (
-            <OrdersSection
-              title="Theo dõi đơn hàng"
-              loading={ordersLoading}
-              orders={trackingOrders}
-              emptyTitle="Bạn chưa có đơn hàng đang xử lý"
-              emptyDescription="Các đơn chờ xác nhận, đang chuẩn bị hoặc đang giao sẽ xuất hiện tại đây."
-              onCancelOrder={handleCancelOrder}
-            />
+            <section className="space-y-4">
+              <div className="rounded-3xl border border-gray-100 bg-white p-5 shadow-sm flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="text-2xl font-bold text-dark">Theo dõi đơn hàng</h3>
+                  <p className="text-sm text-gray-500">Các đơn đang chờ xác nhận, đang chuẩn bị hoặc đang giao.</p>
+                </div>
+                {/* Thanh tìm kiếm đơn đang giao */}
+                <div className="relative">
+                  <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    value={trackingSearch}
+                    onChange={(e) => setTrackingSearch(e.target.value)}
+                    placeholder="Tìm mã đơn hoặc tên món..."
+                    className="h-11 w-full rounded-xl border border-gray-200 bg-white pl-9 pr-9 text-sm outline-none focus:border-primary sm:w-60"
+                  />
+                  {trackingSearch && (
+                    <button
+                      onClick={() => setTrackingSearch('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      <XCircle size={15} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {trackingSearch && (
+                <p className="text-sm text-gray-500 px-2">
+                  Tìm thấy <span className="font-bold text-dark">{filteredTrackingOrders.length}</span> đơn hàng đang xử lý cho &quot;<span className="text-primary">{trackingSearch}</span>&quot;
+                </p>
+              )}
+
+              <OrdersSection
+                title=""
+                loading={ordersLoading}
+                orders={filteredTrackingOrders}
+                emptyTitle={trackingSearch ? 'Không tìm thấy đơn hàng đang xử lý' : 'Bạn chưa có đơn hàng đang xử lý'}
+                emptyDescription={trackingSearch ? 'Thử tìm bằng tên món ăn hoặc 8 ký tự cuối mã đơn.' : 'Các đơn chờ xác nhận, đang chuẩn bị hoặc đang giao sẽ xuất hiện tại đây.'}
+                onCancelOrder={handleCancelOrder}
+              />
+            </section>
           )}
 
           {activeTab === 'history' && (
             <section className="space-y-4">
-              <div className="flex flex-col justify-between gap-3 rounded-3xl border border-gray-100 bg-white p-5 shadow-sm md:flex-row md:items-center">
-                <div>
-                  <h3 className="text-2xl font-bold text-dark">Lịch sử mua hàng</h3>
-                  <p className="text-sm text-gray-500">Xem lại các đơn đã hoàn thành hoặc đã hủy.</p>
+              {/* Header + bộ lọc */}
+              <div className="rounded-3xl border border-gray-100 bg-white p-5 shadow-sm">
+                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <h3 className="text-2xl font-bold text-dark">Lịch sử mua hàng</h3>
+                    <p className="text-sm text-gray-500">Xem lại các đơn đã hoàn thành hoặc đã hủy.</p>
+                  </div>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                    {/* Thanh tìm kiếm */}
+                    <div className="relative">
+                      <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input
+                        type="text"
+                        value={historySearch}
+                        onChange={(e) => setHistorySearch(e.target.value)}
+                        placeholder="Tìm mã đơn hoặc tên món..."
+                        className="h-11 w-full rounded-xl border border-gray-200 bg-white pl-9 pr-9 text-sm outline-none focus:border-primary sm:w-60"
+                      />
+                      {historySearch && (
+                        <button
+                          onClick={() => setHistorySearch('')}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                        >
+                          <XCircle size={15} />
+                        </button>
+                      )}
+                    </div>
+                    {/* Filter trạng thái */}
+                    <select
+                      value={historyFilter}
+                      onChange={(event) => setHistoryFilter(event.target.value)}
+                      className="h-11 rounded-xl border border-gray-200 bg-white px-4 text-sm font-semibold outline-none focus:border-primary"
+                    >
+                      <option value="all">Tất cả lịch sử</option>
+                      <option value="completed">Đơn hoàn thành</option>
+                      <option value="cancelled">Đơn đã hủy</option>
+                    </select>
+                  </div>
                 </div>
-                <select
-                  value={historyFilter}
-                  onChange={(event) => setHistoryFilter(event.target.value)}
-                  className="h-11 rounded-xl border border-gray-200 bg-white px-4 text-sm font-semibold outline-none focus:border-primary"
-                >
-                  <option value="all">Tất cả lịch sử</option>
-                  <option value="completed">Đơn hoàn thành</option>
-                  <option value="cancelled">Đơn đã hủy</option>
-                </select>
+                {/* Kết quả tìm kiếm */}
+                {historySearch && (
+                  <p className="mt-3 text-sm text-gray-500">
+                    Tìm thấy <span className="font-bold text-dark">{historyOrders.length}</span> đơn hàng cho &quot;<span className="text-primary">{historySearch}</span>&quot;
+                  </p>
+                )}
               </div>
+
+              {/* Gợi ý thông minh nếu đơn hàng đang ở mục Theo dõi đơn hàng */}
+              {matchedInTracking && (
+                <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm shadow-sm">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-700 shrink-0">
+                      <Truck size={20} />
+                    </div>
+                    <div>
+                      <p className="font-bold text-amber-900">
+                        Tìm thấy đơn hàng #{matchedInTracking._id.slice(-8).toUpperCase()} trong mục &quot;Theo dõi đơn hàng&quot;
+                      </p>
+                      <p className="text-amber-700 text-xs mt-0.5">
+                        Đơn này đang ở trạng thái: <span className="font-bold text-amber-800">{statusLabels[matchedInTracking.orderStatus]}</span> (chưa hoàn tất nên không nằm trong Lịch sử mua hàng).
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('tracking')}
+                    className="px-4 py-2 rounded-xl bg-amber-600 text-white font-bold text-xs hover:bg-amber-700 transition shrink-0 shadow-sm"
+                  >
+                    Xem đơn hàng này ngay
+                  </button>
+                </div>
+              )}
+
               <OrdersSection
                 title=""
                 loading={ordersLoading}
                 orders={historyOrders}
-                emptyTitle="Chưa có lịch sử mua hàng"
-                emptyDescription="Khi đơn hoàn thành hoặc bị hủy, hệ thống sẽ lưu lại tại đây."
+                emptyTitle={historySearch ? 'Không tìm thấy đơn hàng' : 'Chưa có lịch sử mua hàng'}
+                emptyDescription={historySearch ? 'Thử tìm bằng tên món ăn hoặc 8 ký tự cuối mã đơn.' : 'Khi đơn hoàn thành hoặc bị hủy, hệ thống sẽ lưu lại tại đây.'}
                 onCancelOrder={handleCancelOrder}
+                onReorder={handleReorder}
               />
             </section>
           )}
@@ -581,7 +950,7 @@ const ProfileInfo = ({ label, value, tone = 'gray' }) => {
   );
 };
 
-const OrdersSection = ({ title, loading, orders, emptyTitle, emptyDescription, onCancelOrder }) => (
+const OrdersSection = ({ title, loading, orders, emptyTitle, emptyDescription, onCancelOrder, onReorder }) => (
   <section className="rounded-3xl border border-gray-100 bg-white p-6 shadow-3d">
     {title && <h3 className="mb-5 text-2xl font-bold text-dark">{title}</h3>}
     {loading ? (
@@ -591,26 +960,28 @@ const OrdersSection = ({ title, loading, orders, emptyTitle, emptyDescription, o
         <ReceiptText className="mx-auto mb-3 text-gray-400" size={34} />
         <p className="font-bold text-dark">{emptyTitle}</p>
         <p className="mx-auto mt-1 max-w-md text-sm text-gray-500">{emptyDescription}</p>
-        <Link to="/foods" className="mt-5 inline-flex rounded-xl bg-primary px-5 py-2 font-bold text-white hover:bg-orange-600">
+        <Link to="/foods" className="mt-5 inline-flex rounded-xl bg-primary px-5 py-2 font-bold text-white hover:bg-primary-dark transition-colors shadow-md shadow-primary-light">
           Xem thực đơn
         </Link>
       </div>
     ) : (
       <div className="space-y-5">
         {orders.map((order) => (
-          <OrderCard key={order._id} order={order} onCancelOrder={onCancelOrder} />
+          <OrderCard key={order._id} order={order} onCancelOrder={onCancelOrder} onReorder={onReorder} />
         ))}
       </div>
     )}
   </section>
 );
 
-const OrderCard = ({ order, onCancelOrder }) => {
+const OrderCard = ({ order, onCancelOrder, onReorder }) => {
   const currentStepIndex = Math.max(0, orderSteps.findIndex((step) => step.key === order.orderStatus));
   const isCancelled = order.orderStatus === 'cancelled';
+  const isCompleted = order.orderStatus === 'completed';
+  const isHistory = isCancelled || isCompleted;
 
   return (
-    <div className={`rounded-2xl border p-5 shadow-sm ${isCancelled ? 'border-rose-100 bg-rose-50/70' : 'border-gray-100 bg-white'}`}>
+    <div className={`rounded-2xl border p-5 shadow-sm transition-all ${isCancelled ? 'border-rose-100 bg-rose-50/70' : 'border-gray-100 bg-white'}`}>
       <div className="flex flex-col justify-between gap-4 border-b pb-4 md:flex-row md:items-start">
         <div>
           <p className="text-sm text-gray-500">
@@ -622,8 +993,25 @@ const OrderCard = ({ order, onCancelOrder }) => {
         <div className="flex flex-wrap items-center gap-2 md:justify-end">
           <StatusBadge status={order.orderStatus} />
           {order.orderStatus === 'pending' && (
-            <button onClick={() => onCancelOrder(order._id)} className="rounded-full border border-red-200 px-3 py-1 text-xs font-bold text-red-600 hover:bg-red-50">
-              Hủy đơn
+            order.paymentStatus === 'paid' ? (
+              <span className="rounded-full bg-amber-50 border border-amber-200 px-3 py-1 text-xs font-semibold text-amber-700" title="Đơn đã thanh toán online. Vui lòng liên hệ hotline để hỗ trợ hủy & hoàn tiền.">
+                Đã thanh toán (Liên hệ hủy)
+              </span>
+            ) : (
+              <button onClick={() => onCancelOrder(order._id)} className="rounded-full border border-red-200 px-3 py-1 text-xs font-bold text-red-600 hover:bg-red-50">
+                Hủy đơn
+              </button>
+            )
+          )}
+          {/* Nút Mua lại – chỉ hiện cho đơn lịch sử */}
+          {isHistory && onReorder && (
+            <button
+              onClick={() => onReorder(order.items)}
+              title="Thêm tất cả món vào giỏ hàng và chuyển sang trang giỏ"
+              className="flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary-light/40 px-3 py-1 text-xs font-bold text-primary transition-all hover:bg-primary hover:text-white hover:shadow-md active:scale-95"
+            >
+              <RotateCcw size={12} />
+              Mua lại
             </button>
           )}
         </div>
@@ -635,7 +1023,7 @@ const OrderCard = ({ order, onCancelOrder }) => {
             const Icon = step.icon;
             const done = index <= currentStepIndex;
             return (
-              <div key={step.key} className={`rounded-2xl border p-3 text-center ${done ? 'border-primary/30 bg-orange-50 text-primary' : 'border-gray-100 bg-gray-50 text-gray-400'}`}>
+              <div key={step.key} className={`rounded-2xl border p-3 text-center ${done ? 'border-primary/30 bg-primary-light/50 text-primary' : 'border-gray-100 bg-gray-50 text-gray-400'}`}>
                 <Icon className="mx-auto mb-2" size={18} />
                 <p className="text-xs font-bold">{step.label}</p>
               </div>
@@ -667,13 +1055,25 @@ const OrderCard = ({ order, onCancelOrder }) => {
         ))}
       </div>
 
-      <div className={`mt-5 grid gap-3 rounded-2xl p-4 text-sm md:grid-cols-3 ${isCancelled ? 'bg-rose-100/70' : 'bg-gray-50'}`}>
-        <OrderMeta label="Thanh toán" value={order.paymentMethod} />
-        <OrderMeta label="Trạng thái phí" value={order.paymentStatus === 'paid' ? 'Đã thanh toán' : 'Chưa thanh toán'} />
-        <div className="flex items-center justify-between md:block md:text-right">
-          <p className="text-gray-500">Tổng tiền</p>
-          <p className="text-xl font-extrabold text-primary">{formatCurrency(order.totalAmount)}</p>
+      <div className={`mt-5 rounded-2xl p-4 text-sm ${isCancelled ? 'bg-rose-100/70' : 'bg-gray-50'}`}>
+        <div className="grid gap-3 md:grid-cols-3">
+          <OrderMeta label="Thanh toán" value={order.paymentMethod} />
+          <OrderMeta label="Trạng thái phí" value={order.paymentStatus === 'paid' ? 'Đã thanh toán' : 'Chưa thanh toán'} />
+          <div className="flex items-center justify-between md:block md:text-right">
+            <p className="text-gray-500">Tổng tiền</p>
+            <p className="text-xl font-extrabold text-primary">{formatCurrency(order.totalAmount)}</p>
+          </div>
         </div>
+        {/* Nút Mua lại lớn ở cuối card – chỉ cho đơn hoàn thành */}
+        {isCompleted && onReorder && (
+          <button
+            onClick={() => onReorder(order.items)}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-primary/30 bg-white py-2.5 text-sm font-bold text-primary transition-all hover:bg-primary hover:text-white hover:shadow-lg active:scale-[0.98]"
+          >
+            <ShoppingCart size={16} />
+            Đặt lại đơn hàng này
+          </button>
+        )}
       </div>
     </div>
   );

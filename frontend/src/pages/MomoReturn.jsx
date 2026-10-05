@@ -87,7 +87,7 @@ const MomoReturn = () => {
             type="button"
             onClick={confirmDevPayment}
             disabled={confirming}
-            className="w-full rounded-xl bg-primary px-5 py-3 font-bold text-white shadow-md transition-colors hover:bg-orange-600 disabled:opacity-70"
+            className="w-full rounded-xl bg-primary px-5 py-3 font-bold text-white shadow-md transition-colors hover:bg-primary-dark disabled:opacity-70"
           >
             {confirming
               ? 'Đang xác nhận...'
@@ -113,7 +113,7 @@ const MomoReturn = () => {
       <div className="flex flex-col sm:flex-row gap-3">
         <Link
           to="/profile?tab=tracking"
-          className="bg-primary text-white px-8 py-3 rounded-full font-bold shadow-lg hover:bg-orange-600 transition-all hover:-translate-y-1"
+          className="bg-primary text-white px-8 py-3 rounded-full font-bold shadow-lg shadow-primary/20 hover:bg-primary-dark transition-all hover:-translate-y-1"
         >
           Theo dõi đơn hàng
         </Link>

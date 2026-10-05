@@ -1,34 +1,79 @@
 @import "tailwindcss";
 
 @theme {
-  --color-primary: #FF7A00;
-  --color-secondary: #FFB36B;
-  --color-healthy: #26C281;
-  --color-cream: #FFF4D8;
-  --color-dark: #1F2937;
-  --color-light: #F8F9FB;
+  --color-primary: #16845B;
+  --color-primary-dark: #116344;
+  --color-primary-light: #E8F5EE;
+  --color-primary-hover: #116344;
+  --color-primary-soft: #F0F8F3;
+  --color-secondary: #10B981;
+  --color-healthy: #16845B;
+  --color-cream: #F0F8F3;
+  --color-dark: #17231D;
+  --color-light: #F7F9F6;
+  --color-surface: #FFFFFF;
+  --color-text-primary: #17231D;
+  --color-text-secondary: #758278;
+  --color-border: #E8EEE9;
+  --color-muted: #F3F6F3;
+  --color-accent: #F59E0B;
+  --color-accent-light: #FFF4DF;
   --color-emerald: #10b981;
   --color-gold: #fbbf24;
   --color-amethyst: #8b5cf6;
-  --shadow-3d: 0 20px 40px -15px rgba(0,0,0,0.1), 0 10px 20px -10px rgba(0,0,0,0.05);
-  --shadow-float: 0 30px 60px -20px rgba(255,122,0,0.25);
-  --shadow-glass: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
-  --shadow-glow-emerald: 0 0 25px rgba(16, 185, 129, 0.4);
+  --shadow-3d: 0 20px 40px -15px rgba(22, 132, 91, 0.1), 0 10px 20px -10px rgba(0,0,0,0.05);
+  --shadow-float: 0 30px 60px -20px rgba(22, 132, 91, 0.25);
+  --shadow-glass: 0 8px 32px 0 rgba(22, 132, 91, 0.08);
+  --shadow-glow-emerald: 0 0 25px rgba(22, 132, 91, 0.35);
   --shadow-glow-gold: 0 0 25px rgba(251, 191, 36, 0.4);
   --shadow-glow-amethyst: 0 0 25px rgba(139, 92, 246, 0.4);
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
 @layer base {
+  /* ── Smooth scrolling toàn trang ── */
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
   body {
     @apply bg-light text-dark font-sans overflow-x-hidden;
+    /* Tối ưu font rendering */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    /* Tránh reflow khi scroll */
+    overscroll-behavior-y: none;
+  }
+
+  /* Tối ưu hình ảnh mặc định */
+  img {
+    display: block;
+    max-width: 100%;
+    /* GPU composite layer cho ảnh animated */
+    will-change: auto;
+  }
+
+  /* Smooth focus outline */
+  :focus-visible {
+    outline: 2px solid #16845B;
+    outline-offset: 2px;
+  }
+
+  /* Tối ưu scroll container */
+  * {
+    scroll-margin-top: 5rem;
   }
 }
 
 @layer utilities {
+  /* ── Glassmorphism ── */
   .glassmorphism {
     @apply bg-white/70 backdrop-blur-md border border-white/20;
   }
-  
+
   .glass-premium {
     @apply bg-white/40 backdrop-blur-xl border border-white/60 shadow-glass;
   }
@@ -46,10 +91,13 @@
     @apply opacity-100;
   }
 
+  /* ── Buttons ── */
   .neo-button {
     @apply relative overflow-hidden transition-all duration-300 shadow-lg hover:shadow-xl hover:-translate-y-1;
+    /* GPU layer hint */
+    will-change: transform, box-shadow;
   }
-  
+
   .neo-button::after {
     content: '';
     @apply absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-full;
@@ -59,106 +107,135 @@
     @apply translate-x-full transition-transform duration-700 ease-in-out;
   }
 
+  /* ── Typography ── */
   .text-gradient {
     @apply bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary;
   }
-  
+
+  /* ── Cards ── */
   .card-3d {
     @apply transition-transform duration-500 hover:-translate-y-2 hover:shadow-3d;
+    will-change: transform;
   }
 
+  /* ── Admin ── */
   .admin-input {
     @apply h-11 w-full rounded-md border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-slate-500;
   }
 
+  /* ── Animations ── */
   .animate-menu-fade {
-    animation: menu-fade 260ms ease-out both;
+    animation: menu-fade 200ms ease-out both;
   }
 
   .animate-menu-card {
-    animation: menu-card 320ms ease-out both;
+    animation: menu-card 260ms ease-out both;
   }
 
   .animate-float {
     animation: float 6s ease-in-out infinite;
+    will-change: transform;
   }
 
   .animate-float-delay {
-    animation: float 6s ease-in-out infinite;
-    animation-delay: -3s;
+    animation: float 6s ease-in-out -3s infinite;
+    will-change: transform;
   }
 
   .animate-spin-slow {
     animation: spin 15s linear infinite;
+    will-change: transform;
   }
 
   .animate-pulse-glow {
     animation: pulse-glow 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    will-change: opacity, transform;
+  }
+
+  .animate-fade-in {
+    animation: fade-in 250ms ease-out both;
+  }
+
+  /* ── Skeleton loading ── */
+  .skeleton {
+    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s infinite;
+  }
+
+  /* ── Page transitions ── */
+  .page-enter {
+    animation: page-in 200ms ease-out both;
   }
 }
 
+/* ── Blob decorations ── */
 .blob {
   position: absolute;
   filter: blur(80px);
   z-index: -1;
   opacity: 0.6;
+  will-change: transform;
 }
 
+/* ── Keyframes ── */
 @keyframes menu-fade {
-  from {
-    opacity: 0.72;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0.72; transform: translateY(6px); }
+  to   { opacity: 1;    transform: translateY(0); }
 }
 
 @keyframes menu-card {
-  from {
-    opacity: 0;
-    transform: translateY(14px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0)  scale(1); }
 }
 
 @keyframes float {
-  0%, 100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-15px);
-  }
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-15px); }
 }
 
 @keyframes pulse-glow {
-  0%, 100% {
-    opacity: 0.6;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.05);
-  }
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50%       { opacity: 1;   transform: scale(1.05); }
 }
 
 @keyframes fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(-6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes skeleton-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Reduce motion: tắt animation cho người dùng yêu cầu ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 
-@layer utilities {
-  .animate-fade-in {
-    animation: fade-in 250ms ease-out both;
-  }
+/* ── Custom scrollbar ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #16845B;
 }

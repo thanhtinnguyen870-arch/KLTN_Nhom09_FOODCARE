@@ -44,10 +44,10 @@ const Hero3D = () => {
           FoodCare phục vụ bữa ăn lành mạnh tại Đà Nẵng, nhận đơn nhanh trong các quận nội thành và gợi ý món phù hợp với thể trạng, mục tiêu sức khỏe, sở thích cá nhân.
         </p>
         <div className="flex space-x-4">
-          <Link to="/foods" className="inline-block rounded-full bg-primary px-8 py-3 text-center font-semibold text-white shadow-lg transition-all duration-300 hover:-translate-y-1 hover:bg-orange-600">
+          <Link to="/foods" className="inline-block rounded-full bg-primary px-8 py-3 text-center font-semibold text-white shadow-lg transition-all duration-300 hover:-translate-y-1 hover:bg-primary-dark">
             Đặt món ngay
           </Link>
-          <Link to="/contact" className="inline-block rounded-full border border-primary bg-white px-8 py-3 text-center font-semibold text-primary shadow-md transition-all duration-300 hover:bg-orange-50">
+          <Link to="/contact" className="inline-block rounded-full border border-primary/40 bg-white px-8 py-3 text-center font-semibold text-primary shadow-sm transition-all duration-300 hover:bg-primary-light hover:border-primary">
             Liên hệ tư vấn
           </Link>
         </div>
@@ -72,11 +72,11 @@ const Hero3D = () => {
         </motion.div>
 
         <motion.div
-          className="absolute bottom-[18%] right-[18%] rounded-3xl border border-primary/20 bg-orange-50/95 px-5 py-4 shadow-xl shadow-orange-200/40 backdrop-blur"
+          className="absolute bottom-[18%] right-[18%] rounded-3xl border border-primary/20 bg-white/95 px-5 py-4 shadow-xl shadow-emerald-950/5 backdrop-blur"
           animate={{ y: [0, 10, 0] }}
           transition={{ duration: 4.5, repeat: Infinity, ease: 'easeInOut' }}
         >
-          <p className="text-sm font-semibold text-orange-700">Món healthy trong ngày</p>
+          <p className="text-sm font-semibold text-primary-dark">Món healthy trong ngày</p>
           <p className="text-lg font-black text-primary">Tươi mới, giao tận nơi</p>
         </motion.div>
       </div>

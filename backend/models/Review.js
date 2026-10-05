@@ -1,5 +1,13 @@
 import mongoose from 'mongoose';
 
+const reviewMediaSchema = new mongoose.Schema(
+  {
+    url: { type: String, required: true },
+    type: { type: String, enum: ['image', 'video'], default: 'image' },
+  },
+  { _id: false }
+);
+
 const reviewSchema = mongoose.Schema(
   {
     user: {
@@ -22,7 +30,11 @@ const reviewSchema = mongoose.Schema(
       type: String,
       default: '',
     },
-    images: [String],
+    // Lưu cả ảnh và video đính kèm
+    images: {
+      type: [reviewMediaSchema],
+      default: [],
+    },
     adminReply: {
       type: String,
     },
@@ -31,6 +43,8 @@ const reviewSchema = mongoose.Schema(
     timestamps: true,
   }
 );
+
+reviewSchema.index({ food: 1, createdAt: -1 });
 
 const Review = mongoose.model('Review', reviewSchema);
 export default Review;

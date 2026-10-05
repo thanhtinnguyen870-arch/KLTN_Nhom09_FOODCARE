@@ -40,11 +40,11 @@ const About = () => {
   return (
     <div className="min-h-screen bg-light">
       <section className="relative overflow-hidden px-4 py-12 md:py-16">
-        <div className="absolute inset-0 z-0 bg-[radial-gradient(circle_at_top_left,rgba(255,122,0,0.16),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(38,194,129,0.14),transparent_30%)]" />
+        <div className="absolute inset-0 z-0 bg-[radial-gradient(circle_at_top_left,rgba(22,132,91,0.12),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.12),transparent_30%)]" />
         <div className="container relative z-10 mx-auto max-w-6xl">
           <div className="grid items-center gap-10 lg:grid-cols-[1.05fr_0.95fr]">
             <div>
-              <span className="mb-4 inline-flex items-center gap-2 rounded-full border border-orange-200 bg-white/80 px-4 py-2 text-sm font-bold text-primary shadow-sm">
+              <span className="mb-4 inline-flex items-center gap-2 rounded-full border border-[#E8EEE9] bg-white/90 px-4 py-2 text-sm font-bold text-primary shadow-sm">
                 <Award size={16} />
                 Dinh dưỡng tử tế cho người Việt
               </span>
@@ -98,12 +98,12 @@ const About = () => {
         <div className="container mx-auto max-w-6xl rounded-[2rem] bg-dark p-6 text-white shadow-3d md:p-10">
           <div className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr]">
             <div>
-              <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-sm font-bold text-orange-100">
+              <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-sm font-bold text-emerald-100">
                 <ShieldCheck size={16} />
                 Lời cam đoan dinh dưỡng
               </span>
               <h2 className="mt-5 text-3xl font-extrabold md:text-4xl">Thực đơn được xây dựng có cơ sở, không chạy theo cảm tính</h2>
-              <p className="mt-4 leading-relaxed text-orange-50/90">
+              <p className="mt-4 leading-relaxed text-emerald-50/90">
                 FoodCare cam kết định hướng thực đơn dựa trên các nguyên tắc dinh dưỡng hợp lý, tham chiếu khuyến nghị dinh dưỡng cho người Việt Nam và tinh thần hướng dẫn của Bộ Y tế Việt Nam cùng Viện Dinh dưỡng Quốc gia.
               </p>
               <p className="mt-4 text-sm leading-relaxed text-white/65">
@@ -139,7 +139,7 @@ const About = () => {
           <div className="grid gap-5 md:grid-cols-3">
             {values.map(({ icon: Icon, title, description }) => (
               <div key={title} className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-3d">
-                <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-orange-50 text-primary">
+                <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-light/60 text-primary">
                   <Icon size={26} />
                 </div>
                 <h3 className="text-xl font-extrabold text-dark">{title}</h3>
@@ -151,7 +151,7 @@ const About = () => {
       </section>
 
       <section className="px-4 pb-16 pt-8">
-        <div className="container mx-auto max-w-5xl rounded-[2rem] border border-orange-100 bg-white p-8 text-center shadow-3d md:p-12">
+        <div className="container mx-auto max-w-5xl rounded-[2rem] border border-[#E8EEE9] bg-white p-8 text-center shadow-3d md:p-12">
           <HeartPulse className="mx-auto mb-5 text-red-500" size={52} />
           <h2 className="text-3xl font-extrabold text-dark">Sức khỏe của bạn là ưu tiên hàng đầu</h2>
           <p className="mx-auto mt-4 max-w-3xl text-lg leading-relaxed text-gray-600">

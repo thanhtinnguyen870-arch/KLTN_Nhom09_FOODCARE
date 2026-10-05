@@ -375,11 +375,11 @@ const Offers = () => {
                 <h2 className="text-3xl font-black text-slate-800 md:text-4xl drop-shadow-sm mb-4">Bắt đầu tích lũy ưu đãi ngay hôm nay</h2>
                 <p className="text-slate-600 text-lg font-medium max-w-xl mx-auto">Thưởng thức những món ăn lành mạnh, nhận ưu đãi hấp dẫn và nâng hạng cùng FoodCare.</p>
                 <div className="mt-8 flex flex-wrap justify-center gap-4">
-                  <Link to="/foods" className="neo-button inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 px-8 py-3.5 text-sm font-bold text-white shadow-glow-emerald">
+                  <Link to="/foods" className="neo-button inline-flex items-center gap-2 rounded-xl bg-primary hover:bg-primary-dark px-8 py-3.5 text-sm font-bold text-white shadow-lg shadow-primary/20 transition-all">
                     <Utensils size={18} />
                     Xem thực đơn
                   </Link>
-                  <Link to="/register" className="neo-button inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200 px-8 py-3.5 text-sm font-bold text-slate-700 shadow-lg hover:border-amber-300 hover:text-amber-600">
+                  <Link to="/register" className="neo-button inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200 px-8 py-3.5 text-sm font-bold text-slate-700 shadow-md hover:border-primary hover:text-primary transition-all">
                     <UserRound size={18} />
                     Đăng ký thành viên
                   </Link>

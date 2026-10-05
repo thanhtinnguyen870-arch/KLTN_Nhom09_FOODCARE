@@ -10,7 +10,7 @@ const contactInfos = [
     icon: <MapPin size={22} />,
     label: 'Địa chỉ',
     value: 'Số 21 Tân Hòa 10, Quận Thanh Khê, Thành phố Đà Nẵng',
-    color: 'bg-orange-100 text-primary',
+    color: 'bg-primary-light text-primary',
   },
   {
     icon: <Phone size={22} />,
@@ -22,8 +22,8 @@ const contactInfos = [
   {
     icon: <Mail size={22} />,
     label: 'Email',
-    value: 'thanhtinnguyen870@gmail.com',
-    href: 'mailto:thanhtinnguyen870@gmail.com',
+    value: 'contact@foodcare.vn',
+    href: 'mailto:contact@foodcare.vn',
     color: 'bg-green-100 text-green-600',
   },
   {
@@ -69,7 +69,7 @@ const Contact = () => {
       <div className="relative z-10 container mx-auto max-w-6xl px-4 py-16">
         {/* Header */}
         <div className="mb-14 text-center">
-          <span className="inline-flex items-center gap-2 bg-orange-100 text-primary px-4 py-1.5 rounded-full text-sm font-bold mb-4">
+          <span className="inline-flex items-center gap-2 bg-primary-light text-primary px-4 py-1.5 rounded-full text-sm font-bold mb-4">
             <MessageCircle size={16} /> Liên hệ với chúng tôi
           </span>
           <h1 className="text-4xl md:text-5xl font-extrabold text-dark mb-4">
@@ -86,7 +86,7 @@ const Contact = () => {
             {contactInfos.map((info) => (
               <div
                 key={info.label}
-                className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 flex items-start gap-4 hover:shadow-md transition-shadow"
+                className="bg-white rounded-2xl p-5 shadow-sm border border-[#E8EEE9] flex items-start gap-4 hover:shadow-md transition-shadow"
               >
                 <div className={`w-12 h-12 flex-shrink-0 rounded-2xl flex items-center justify-center ${info.color}`}>
                   {info.icon}
@@ -189,7 +189,7 @@ const Contact = () => {
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary px-8 py-3.5 text-base font-bold text-white shadow-lg transition-all hover:bg-orange-600 hover:-translate-y-0.5 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-60"
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary px-8 py-3.5 text-base font-bold text-white shadow-lg transition-all hover:bg-primary-dark hover:-translate-y-0.5 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Send size={18} />
                   {isSubmitting ? 'Đang gửi...' : 'Gửi tin nhắn'}

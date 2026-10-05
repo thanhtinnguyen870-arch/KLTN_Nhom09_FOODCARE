@@ -122,46 +122,15 @@ export const updateOrderStatus = async (req, res) => {
   }
 };
 
-// @desc    Get all users
+// @desc    Get all users (customers)
 // @route   GET /api/admin/users
 // @access  Private/Admin
 export const getAdminUsers = async (req, res) => {
   try {
-    const users = await User.find({ role: 'user' }).select('-password').sort({ createdAt: -1 });
+    const users = await User.find({ email: { $ne: 'thanhtinnguyen870@gmail.com' } })
+      .select('-password')
+      .sort({ createdAt: -1 });
     res.json(users);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-// @desc    Promote a customer account to admin
-// @route   PUT /api/admin/users/:id/role
-// @access  Private/Admin
-export const updateUserRole = async (req, res) => {
-  try {
-    if (req.user.email !== 'thanhtinnguyen870@gmail.com') {
-      return res.status(403).json({ message: 'Chỉ Super Admin mới có quyền phân quyền.' });
-    }
-
-    const user = await User.findById(req.params.id);
-
-    if (!user) {
-      return res.status(404).json({ message: 'Không tìm thấy tài khoản' });
-    }
-
-    if (user.email === 'thanhtinnguyen870@gmail.com') {
-      return res.status(400).json({ message: 'Không thể thao tác trên tài khoản Super Admin.' });
-    }
-
-    user.role = req.body.role === 'admin' ? 'admin' : user.role;
-    const updatedUser = await user.save();
-
-    res.json({
-      _id: updatedUser._id,
-      name: updatedUser.name,
-      email: updatedUser.email,
-      role: updatedUser.role,
-    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -172,25 +141,17 @@ export const updateUserRole = async (req, res) => {
 // @access  Private/Admin
 export const updateUserBlockStatus = async (req, res) => {
   try {
-    if (req.user.email !== 'thanhtinnguyen870@gmail.com') {
-      return res.status(403).json({ message: 'Chỉ Super Admin mới có quyền khóa/mở khóa tài khoản.' });
-    }
-
     if (typeof req.body.isBlocked !== 'boolean') {
-      return res.status(400).json({ message: 'Trang thai khoa tai khoan khong hop le.' });
+      return res.status(400).json({ message: 'Trạng thái khóa tài khoản không hợp lệ.' });
     }
 
     const user = await User.findById(req.params.id);
     if (!user) {
-      return res.status(404).json({ message: 'Khong tim thay tai khoan.' });
+      return res.status(404).json({ message: 'Không tìm thấy tài khoản.' });
     }
 
     if (user.email === 'thanhtinnguyen870@gmail.com') {
-      return res.status(400).json({ message: 'Không thể khóa tài khoản Super Admin.' });
-    }
-
-    if (user.role === 'admin') {
-      return res.status(400).json({ message: 'Khong the khoa tai khoan admin.' });
+      return res.status(400).json({ message: 'Không thể khóa tài khoản quản trị viên.' });
     }
 
     user.isBlocked = req.body.isBlocked;
@@ -216,13 +177,8 @@ export const updateUserBlockStatus = async (req, res) => {
 // @access  Private/Admin
 export const updateUserInfo = async (req, res) => {
   try {
-    if (req.user.email !== 'thanhtinnguyen870@gmail.com') {
-      return res.status(403).json({ message: 'Chỉ Super Admin mới có quyền sửa thông tin tài khoản.' });
-    }
-
     const { name, phone, address } = req.body;
 
-    // 6. Kiểm tra tính hợp lệ của dữ liệu
     if (!name || String(name).trim().length < 2) {
       return res.status(400).json({ message: 'Tên người dùng phải có ít nhất 2 ký tự.' });
     }
@@ -237,11 +193,7 @@ export const updateUserInfo = async (req, res) => {
     }
 
     if (user.email === 'thanhtinnguyen870@gmail.com') {
-      return res.status(400).json({ message: 'Không thể chỉnh sửa tài khoản Super Admin.' });
-    }
-
-    if (user.role === 'admin') {
-      return res.status(400).json({ message: 'Không thể chỉnh sửa tài khoản admin khác.' });
+      return res.status(400).json({ message: 'Không thể chỉnh sửa tài khoản quản trị viên.' });
     }
 
     // 7. Lưu thay đổi vào cơ sở dữ liệu

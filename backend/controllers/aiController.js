@@ -1,91 +1,85 @@
 import OpenAI from 'openai';
 import Food from '../models/Food.js';
 import AIChat from '../models/AIChat.js';
+import AIQuestionLog from '../models/AIQuestionLog.js';
 
-const getOpenAIBaseURL = () => {
-  const rawURL = process.env.OPENAI_API_URL || 'https://api.openai.com/v1';
-  return rawURL.replace(/\/chat\/completions\/?$/, '').replace(/\/$/, '');
+const detectQuestionTopics = (text = '') => {
+  const lower = text.toLowerCase();
+  const topics = [];
+  if (/tiểu đường|đường huyết|đái tháo đường/.test(lower)) topics.push('Tiểu đường');
+  if (/giảm cân|béo|giảm mỡ|diet|eat clean|calo ít/.test(lower)) topics.push('Giảm cân / Eat Clean');
+  if (/tăng cơ|gym|thể hình|đạm|protein|bulking/.test(lower)) topics.push('Tăng cơ / Gym');
+  if (/chay|thuần chay|vegetable|vegetarian/.test(lower)) topics.push('Ăn chay');
+  if (/huyết áp|tim mạch|cholesterol/.test(lower)) topics.push('Tim mạch / Huyết áp');
+  if (/dạ dày|tiêu hóa|đau bụng/.test(lower)) topics.push('Dạ dày / Tiêu hóa');
+  if (/chào|hi|hello|ơi|shop ơi/.test(lower)) topics.push('Chào hỏi / Xã giao');
+  if (topics.length === 0) topics.push('Tư vấn món ăn');
+  return topics;
 };
 
-const getAIProvider = () => (process.env.AI_PROVIDER || 'openai').toLowerCase();
-
-const generateWithOpenAI = async (systemPrompt, message) => {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error('Missing OPENAI_API_KEY');
-  }
-
-  const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-    baseURL: getOpenAIBaseURL()
-  });
-
-  const completion = await openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: message }
-    ],
-    temperature: 0.7,
-  });
-
-  return completion.choices[0].message.content;
-};
-
-const generateWithGemini = async (systemPrompt, message) => {
-  if (!process.env.GEMINI_API_KEY) {
-    throw new Error('Missing GEMINI_API_KEY');
-  }
-
-  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': process.env.GEMINI_API_KEY,
-      },
-      body: JSON.stringify({
-        systemInstruction: {
-          parts: [{ text: systemPrompt }],
-        },
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: message }],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.7,
-        },
-      }),
+const buildMessages = (systemPrompt, conversationHistory = [], message) => {
+  const messages = [{ role: 'system', content: systemPrompt }];
+  if (Array.isArray(conversationHistory)) {
+    for (const chat of conversationHistory) {
+      if (chat.user) {
+        messages.push({ role: 'user', content: chat.user });
+      }
+      if (chat.assistant) {
+        messages.push({ role: 'assistant', content: chat.assistant });
+      }
     }
-  );
-
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data.error?.message || 'Gemini request failed');
   }
-
-  const text = data.candidates?.[0]?.content?.parts
-    ?.map((part) => part.text)
-    .filter(Boolean)
-    .join('\n')
-    .trim();
-
-  if (!text) {
-    throw new Error('Gemini returned an empty response');
-  }
-
-  return text;
+  messages.push({ role: 'user', content: message });
+  return messages;
 };
 
-const generateAIResponse = async (systemPrompt, message) => {
-  if (getAIProvider() === 'gemini') {
-    return generateWithGemini(systemPrompt, message);
+const generateAIResponse = async (systemPrompt, conversationHistory, message) => {
+  if (!process.env.GROQ_API_KEY) {
+    throw new Error('Chưa cấu hình GROQ_API_KEY trong file .env');
   }
 
-  return generateWithOpenAI(systemPrompt, message);
+  const groq = new OpenAI({
+    apiKey: process.env.GROQ_API_KEY,
+    baseURL: 'https://api.groq.com/openai/v1',
+    timeout: 12000,
+  });
+
+  const invalidModels = new Set(['groq/compound-mini', 'qwen/qwen3.6-27b']);
+  const configuredModel = process.env.GROQ_MODEL;
+  const primaryModel = (configuredModel && !invalidModels.has(configuredModel))
+    ? configuredModel
+    : 'qwen/qwen3.8-27b';
+  const backupModels = ['qwen/qwen3.8-27b', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'].filter((m) => m !== primaryModel);
+
+  try {
+    const completion = await groq.chat.completions.create({
+      model: primaryModel,
+      messages: buildMessages(systemPrompt, conversationHistory, message),
+      temperature: 0.3,
+      max_tokens: 1024,
+    });
+
+    return completion.choices[0].message.content;
+  } catch (primaryError) {
+    console.warn(`Groq model ${primaryModel} gặp lỗi:`, primaryError.message);
+
+    for (const backupModel of backupModels) {
+      try {
+        console.log(`Đang thử lại với Groq backup model (${backupModel})...`);
+        const backupCompletion = await groq.chat.completions.create({
+          model: backupModel,
+          messages: buildMessages(systemPrompt, conversationHistory, message),
+          temperature: 0.3,
+          max_tokens: 1024,
+        });
+        return backupCompletion.choices[0].message.content;
+      } catch (backupError) {
+        console.warn(`Groq backup model (${backupModel}) cũng gặp lỗi:`, backupError.message);
+      }
+    }
+
+    throw primaryError;
+  }
 };
 
 const extractRecommendedFoodNames = (aiResponseText) => {
@@ -131,129 +125,158 @@ export const recommendFood = async (req, res) => {
       return res.status(400).json({ message: 'Vui long nhap cau hoi can tu van.' });
     }
 
-    if (message.length > 2000) {
-      return res.status(400).json({ message: 'Cau hoi vuot qua do dai cho phep.' });
+    if (message.length > 1000) {
+      return res.status(400).json({ message: 'Cau hoi vuot qua do dai cho phep (toi da 1000 ky tu).' });
     }
 
-    // Fetch foods from DB to provide context
-    const foods = await Food.find({ isAvailable: true }).select(
-      'name description ingredients price nutrition healthTags suitableFor warningFor'
-    );
+    // Lấy tất cả món ăn trong menu để AI nhận biết được cả món đang có sẵn và món tạm hết
+    const allFoods = await Food.find({})
+      .select('name price healthTags suitableFor warningFor nutrition.calories isAvailable')
+      .lean();
 
-    const foodContext = foods.map(f => 
-      `Món: ${f.name}\n` +
-      `Thành phần: ${f.ingredients.join(', ')}\n` +
-      `Dinh dưỡng: Calo ${f.nutrition.calories}, Protein ${f.nutrition.protein}g, Carb ${f.nutrition.carbs}g, Béo ${f.nutrition.fat}g, Đường ${f.nutrition.sugar}g\n` +
-      `Phù hợp: ${f.suitableFor.join(', ')}\n` +
-      `Hạn chế: ${f.warningFor.join(', ')}\n` +
-      `Tags: ${f.healthTags.join(', ')}\n`
-    ).join('\n---\n');
+    const availableFoods = allFoods.filter((f) => f.isAvailable !== false);
+    const unavailableFoods = allFoods.filter((f) => f.isAvailable === false);
 
-    const portionGuidance = `
-QUY TAC TU VAN DIEU CHINH KHAU PHAN:
-- Thanh phan trong menu la khau phan healthy tieu chuan cho nguoi binh thuong. Vi du "Gao lut 100g(345 calo)" nghia la khau phan goc cua mon co 100g gao lut.
-- Khi nguoi dung co benh ly hoac muc tieu rieng, hay giu ten mon trong menu nhung de xuat dieu chinh gram tung nguyen lieu neu can.
-- Neu nguoi dung bi tieu duong, tien tieu duong, can kiem soat duong huyet, hoac hoi mon co phu hop khong: uu tien giam nguon tinh bot/duong nhu gao, bun, mi, mien, khoai, trai cay ngot, nuoc ep; tang/giu rau xanh va dam nac. Goi y giam tinh bot khoang 20-40% tuy mon. Vi du: "Com gao lut uc ga rau cu" co gao lut 100g thi co the de xuat "gao lut 70g", giu uc ga, tang sup lo/cai xanh/dua chuot neu phu hop.
-- Neu nguoi dung giam can: giam tinh bot va nguyen lieu nhieu nang luong khoang 10-30%, tang rau it calo, giu dam nac de no lau.
-- Neu nguoi dung tang co/tap gym: co the giu hoac tang dam 10-30%, giu tinh bot vua du cho buoi tap; khong tu dong cat tinh bot qua manh.
-- Neu nguoi dung cao huyet ap: uu tien mon it muoi/it natri, khuyen giam nuoc cham, nuoc tuong, do che bien san; khong tang sodium.
-- Neu nguoi dung hoi ve mot mon cu the, hay tra loi theo cau truc:
-  1. Mon nay co phu hop hay khong va vi sao.
-  2. Khau phan goc tu menu.
-  3. Khau phan nen dieu chinh theo tinh trang cua nguoi dung, ghi ro gram moi.
-  4. Neu tinh duoc tu calo trong ngoac, hay uoc tinh calo sau dieu chinh va noi ro la uoc tinh.
-  5. Nhac thong tin chi tham khao, nen hoi bac si/chuyen gia dinh duong neu co benh ly.
-- BAT BUOC: Neu nguoi dung co tieu duong/tien tieu duong/duong huyet cao/giam can va hoi ve mot mon co tinh bot, khong duoc chi lap lai y nguyen khau phan goc. Phai tao muc "Khau phan de xuat" co it nhat 1 thanh phan bi giam/tang ro rang.
-- BAT BUOC: Khi dieu chinh, hay viet dang bang Markdown voi cac cot: Thanh phan | Khau phan goc | Khau phan de xuat | Ly do.
-- BAT BUOC: Voi tieu duong, nguon tinh bot chinh phai giam ro rang neu co. Quy tac nhanh:
-  * Gao/bun/mi/mien/khoai 100g -> 60-75g.
-  * Gao/bun/mi/mien/khoai 80-99g -> 55-70g.
-  * Trai cay/nuoc ep ngot -> giam 30-50% hoac khuyen han che.
-  * Dam nac nhu ga/ca/tom/dau phu co the giu nguyen hoac tang 10-20g neu can no lau.
-  * Rau it calo nhu sup lo, cai xanh, cai thia, dua chuot, bi xanh co the tang 20-50g.
-- VI DU MAU:
-  Neu mon goc la "Com gao lut uc ga rau cu" gom "Gao lut 100g(345 calo), Thit ga ta 80g(159 calo), Sup lo xanh 70g(18 calo), Ca rot 40g(16 calo)" va nguoi dung bi tieu duong, cau tra loi phai de xuat:
-  | Gao lut | 100g | 70g | Giam tinh bot de han che tang duong huyet sau an |
-  | Thit ga ta | 80g | 90g | Giu/tang nhe dam nac giup no lau |
-  | Sup lo xanh | 70g | 100g | Tang chat xo, it calo |
-  | Ca rot | 40g | 30-40g | Giu vua phai vi co vi ngot tu nhien |
-  Uoc tinh calo moi phai thap hon khau phan goc neu giam tinh bot.
-- Khong bia ra mon an ngoai menu. Khi thay the nguyen lieu, uu tien cac nguyen lieu dang co trong menu/bang thanh phan.
-`;
+    // Context món có sẵn (đang bán)
+    const availableFoodContext = availableFoods.map(f =>
+      `- ${f.name} (${(f.price || 0).toLocaleString()}đ, ~${f.nutrition?.calories || '?'} kcal)` +
+      (f.healthTags?.length   ? ` [${f.healthTags.join(', ')}]` : '') +
+      (f.suitableFor?.length  ? ` ✓${f.suitableFor.join(', ')}` : '') +
+      (f.warningFor?.length   ? ` ✗${f.warningFor.join(', ')}` : '')
+    ).join('\n');
 
-    const systemPrompt = `Bạn là trợ lý tư vấn món ăn thông minh cho website FoodCare AI. 
-Người dùng tên là ${user.name}.
-Hồ sơ sức khỏe của người dùng (nếu có): 
-- Tuổi: ${user.healthProfile?.age || 'Không rõ'}
-- Bệnh lý: ${user.healthProfile?.conditions?.join(', ') || 'Không có'}
-- Dị ứng: ${user.healthProfile?.allergies?.join(', ') || 'Không có'}
-- Mục tiêu: ${user.healthProfile?.goal || 'Không rõ'}
+    // Context món tạm hết (không khả dụng)
+    const unavailableFoodContext = unavailableFoods.length > 0
+      ? unavailableFoods.map(f => `- ${f.name} [TẠM HẾT]`).join('\n')
+      : '(Hiện tại không có món nào tạm hết)';
 
-Nhiệm vụ của bạn là hỗ trợ người dùng chọn món ăn phù hợp với nhu cầu, sở thích và tình trạng cơ thể.
-Bạn CHỈ ĐƯỢC phép gợi ý các món ăn có trong danh sách dữ liệu thực đơn dưới đây. Tuyệt đối KHÔNG bịa ra món ăn không tồn tại trong danh sách.
+    // Nhận diện nhanh nếu khách hỏi đích danh món đang tạm hết
+    const removeAccents = (str = '') =>
+      str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/đ/g, 'd').trim();
 
-Danh sách thực đơn hiện có:
-${foodContext}
+    const cleanMsg = removeAccents(message);
+    const mentionedUnavailableFoods = unavailableFoods.filter((f) => {
+      const cleanName = removeAccents(f.name);
+      return cleanMsg.includes(cleanName) || message.toLowerCase().includes(f.name.toLowerCase());
+    });
 
-Quy tắc bắt buộc:
-1. Khi người dùng nhắc đến bệnh lý như tiểu đường, cao huyết áp, v.v., bạn phải trả lời thận trọng.
-2. Không chẩn đoán bệnh. Khuyến nghị hỏi bác sĩ.
-3. Giải thích lý do chọn món.
-4. Nêu các món nên hạn chế nếu cần.
-5. Trả lời bằng tiếng Việt, thân thiện, rõ ràng, trình bày đẹp bằng Markdown (bullet points, in đậm).
-6. Luôn nhắc nhở ở cuối: "Thông tin chỉ mang tính tham khảo, không thay thế lời khuyên từ bác sĩ hoặc chuyên gia dinh dưỡng."
-7. Cuối cùng, hãy liệt kê CHÍNH XÁC tên các món ăn bạn gợi ý thành một mảng JSON (ví dụ: ["Salad ức gà rau củ", "Đậu hũ sốt nấm"]) nằm ở dòng cuối cùng của câu trả lời, theo định dạng: RECOMMENDATIONS: ["Tên món 1", "Tên món 2"]. Đây là mã để hệ thống trích xuất.`;
+    let unavailableNotice = '';
+    if (mentionedUnavailableFoods.length > 0) {
+      const namesStr = mentionedUnavailableFoods.map(f => `"${f.name}"`).join(', ');
+      unavailableNotice = `\n⚠️ CẢNH BÁO QUAN TRỌNG: Khách hàng đang hỏi về món ${namesStr} - món này hiện ĐANG TẠM HẾT trên hệ thống! BẮT BUỘC thông báo rõ ràng cho khách rằng món này đã tạm hết/hết hàng. Tuyệt đối KHÔNG được nói món này còn hàng và KHÔNG nhầm lẫn với bất kỳ món nào khác (ví dụ: không nhầm lẫn giữa "Cơm khoai lang gà cải xanh" và "Gà ta khoai lang cải xanh"). Có thể gợi ý món thay thế tương tự đang có sẵn.`;
+    }
 
-    const upgradedSystemPrompt = `${systemPrompt}
+    // Hồ sơ sức khỏe người dùng (chỉ nếu có)
+    const hp = user.healthProfile;
+    const healthSummary = [
+      hp?.age        ? `Tuổi: ${hp.age}`                                 : '',
+      hp?.conditions?.length ? `Bệnh: ${hp.conditions.join(', ')}`       : '',
+      hp?.allergies?.length  ? `Dị ứng: ${hp.allergies.join(', ')}`      : '',
+      hp?.goal       ? `Mục tiêu: ${hp.goal}`                            : '',
+    ].filter(Boolean).join(' | ') || 'Không có thông tin';
 
-CAP NHAT VAI TRO MO RONG:
-${portionGuidance}
-- Ban la tro ly FoodCare ve dinh duong, suc khoe tong quat, thoi quen an uong, loi song lanh manh va lua chon mon an.
-- Ban co the tra loi cac cau hoi ve calo, protein, carb, chat beo, vitamin, khoang chat, giam can, tang can, tap luyen, tieu duong, huyet ap, cholesterol, gout, da day, di ung thuc pham, an chay, an kieng va lap ke hoach bua an.
-- Voi cau hoi suc khoe, chi dua thong tin giao duc va khuyen nghi an toan o muc tham khao. Khong chan doan benh, khong ke don thuoc, khong thay the bac si.
-- Neu nguoi dung co dau hieu nguy hiem nhu dau nguc, kho tho, dot quy, ngat, dau bung du doi, phan ung di ung nang, duong huyet qua cao/thap hoac trieu chung cap cuu, hay khuyen di cap cuu hoac gap bac si ngay.
-- Neu cau hoi khong lien quan truc tiep den mon an, van tra loi huu ich trong pham vi suc khoe/dinh duong/loi song. Khi khong can goi y mon trong menu, dong cuoi phai la: RECOMMENDATIONS: [].
-- Khi goi y mon an, chi duoc goi y cac mon co trong danh sach thuc don. Dong cuoi phai la JSON array dung dinh dang: RECOMMENDATIONS: ["Ten mon 1", "Ten mon 2"].
-- Tra loi bang tieng Viet tu nhien, ngan gon nhung du thong tin; uu tien checklist, bullet point va loi khuyen thuc te de nguoi dung lam theo.`;
+    // Lấy tối đa 4 lượt chat gần nhất để AI hiểu ngữ cảnh trò chuyện liên tục
+    const recentChats = await AIChat.find({ user: user._id })
+      .sort({ createdAt: -1 })
+      .limit(4)
+      .lean();
+    recentChats.reverse();
+
+    const conversationHistory = recentChats.map((c) => ({
+      user: c.message,
+      assistant: c.response,
+    }));
+
+    const systemPrompt = `Bạn là chuyên viên dinh dưỡng và chăm sóc khách hàng thông minh của FoodCare (cửa hàng đồ ăn dinh dưỡng & cá nhân hoá sức khỏe).
+Khách hàng: ${user.name || 'Quý khách'} | ${healthSummary}${unavailableNotice}
+
+THỰC ĐƠN ĐANG CÓ SẴN (CÒN HÀNG - CÓ THỂ ĐẶT MÓN):
+${availableFoodContext}
+
+DANH SÁCH MÓN ĐANG TẠM HẾT (HẾT HÀNG - KHÔNG THỂ ĐẶT MÓN):
+${unavailableFoodContext}
+
+HƯỚNG DẪN XỬ LÝ THEO TỪNG LOẠI CÂU HỎI (RẤT QUAN TRỌNG):
+1. NẾU KHÁCH CHÀO HỎI / XÃ GIAO / CẢM ƠN (ví dụ: "hi", "chào shop", "hello", "shop ơi", "bạn là ai", "cảm ơn", "tạm biệt"):
+   - Chào lại khách hàng một cách thân thiện, nhiệt tình và lịch sự.
+   - Giới thiệu bạn là trợ lý dinh dưỡng FoodCare, sẵn sàng tư vấn món ăn phù hợp với khẩu vị, chế độ ăn kiêng (giảm cân, tập gym, ăn chay, eat clean...) hoặc hỗ trợ bệnh lý (tiểu đường, huyết áp...).
+   - Hỏi khách hôm nay cần tư vấn món ăn hay hỗ trợ điều gì.
+   - TUYỆT ĐỐI KHÔNG tự động liệt kê danh sách món ăn khi khách chỉ mới chào hỏi hoặc chưa hỏi món!
+   - Dòng cuối cùng bắt buộc: RECOMMENDATIONS: []
+
+2. NẾU KHÁCH HỎI KIỂM TRA MÓN ĂN CÒN HAY HẾT (ví dụ: "cơm khoai lang gà cải xanh còn không?", "món X còn không?"):
+   - ĐỐI CHIẾU CHÍNH XÁC TÊN MÓN KHÁCH HỎI:
+     + Chú ý phân biệt chính xác tên món, TRÁNH nhầm lẫn giữa các món có tên gần giống nhau (Ví dụ: "Cơm khoai lang gà cải xanh" là món TẠM HẾT, hoàn toàn khác biệt với món "Gà ta khoai lang cải xanh" đang CÒN HÀNG).
+   - Nếu món khách hỏi nằm trong "DANH SÁCH MÓN ĐANG TẠM HẾT":
+     + THÔNG BÁO RÕ RÀNG: Món **[Tên món khách hỏi]** hiện tại đã TẠM HẾT (chưa thể đặt hàng lúc này).
+     + TUYỆT ĐỐI KHÔNG nói món đó còn hàng, và TUYỆT ĐỐI KHÔNG lấy thông tin món khác có tên gần giống để nói là còn hàng!
+     + Lịch sự gợi ý khách 1-2 món tương tự ĐANG CÓ SẴN trên thực đơn để thay thế (nêu rõ món gợi ý này đang có sẵn).
+     + Ở dòng RECOMMENDATIONS, chỉ đưa món thay thế đang có sẵn (nếu có gợi ý), TUYỆT ĐỐI KHÔNG đưa món tạm hết vào.
+   - Nếu món khách hỏi nằm trong "THỰC ĐƠN ĐANG CÓ SẴN":
+     + Báo cho khách biết món **[Tên món]** hiện đang có sẵn trên thực đơn, kèm giá và calo để khách đặt món.
+     + Dòng cuối cùng: RECOMMENDATIONS: ["Tên món"]
+   - Nếu món không có trong cả 2 danh sách:
+     + Thông báo cửa hàng hiện chưa có món này trên thực đơn, gợi ý 1-2 món có sẵn phù hợp.
+     + Dòng cuối cùng: RECOMMENDATIONS: [...]
+
+3. NẾU KHÁCH HỎI VỀ DỊCH VỤ / CÂU HỎI CHUNG (ví dụ: giao hàng, giờ mở cửa, cách thức đặt món, thanh toán):
+   - Trả lời ngắn gọn, lịch sự, đúng trọng tâm và hướng dẫn khách đặt món trên website.
+   - Dòng cuối cùng bắt buộc: RECOMMENDATIONS: []
+
+4. NẾU KHÁCH CẦN TƯ VẤN MÓN ĂN / DINH DƯỠNG / BỆNH LÝ / BỮA ĂN:
+   - Trả lời đúng trọng tâm câu hỏi của khách, kết hợp với hồ sơ sức khỏe nếu có.
+   - CHỈ GỢI Ý các món trong "THỰC ĐƠN ĐANG CÓ SẴN" (tuyệt đối KHÔNG gợi ý món đang TẠM HẾT).
+   - In đậm tên món ăn: **Tên món**, kèm lý do ngắn gọn vì sao phù hợp (calo, đạm, ít tinh bột/đường, tốt cho sức khỏe...).
+   - Nếu khách hỏi về bệnh lý hoặc ăn kiêng đặc biệt, thêm 1 dòng: "⚠️ Tham khảo bác sĩ trước khi thay đổi chế độ ăn."
+   - Dòng CUỐI CÙNG bắt buộc phải là:
+     RECOMMENDATIONS: ["Tên món 1", "Tên món 2"]
+
+QUY TẮC:
+• Trả lời tự nhiên, súc tích, bằng tiếng Việt chuẩn mực, tối đa 150-200 từ.
+• Đọc thật kỹ tên món khách hỏi để đối chiếu chính xác với cả 2 danh sách ĐANG CÓ SẴN và ĐANG TẠM HẾT.
+• KHÔNG bịa ra món ngoài danh sách THỰC ĐƠN.
+• Mảng RECOMMENDATIONS: [...] CHỈ ĐƯỢC CHỨA các món ĐANG CÓ SẴN, tuyệt đối KHÔNG chứa món TẠM HẾT.`;
 
     let aiResponseText;
     try {
-      aiResponseText = await generateAIResponse(upgradedSystemPrompt, message);
+      aiResponseText = await generateAIResponse(systemPrompt, conversationHistory, message);
     } catch (apiError) {
       console.warn('AI API Error (Fallback triggered):', apiError.message);
-      
-      // Fallback mode using actual DB foods to prevent presentation failure
-      const fallbackFoods = foods.slice(0, 3);
+      const fallbackFoods = availableFoods.slice(0, 3);
       const fallbackNames = fallbackFoods.map(f => f.name);
-      
-      aiResponseText = `Chào bạn, hiện tại máy chủ AI đang quá tải nên tôi đang dùng chế độ tư vấn dự phòng. Tuy nhiên, tôi xin gợi ý một số món ăn nổi bật của cửa hàng rất phù hợp cho bạn lúc này:
-
-${fallbackFoods.map(f => `- **${f.name}**: Rất ngon và đầy đủ dinh dưỡng.`).join('\n')}
-
-Chúc bạn có một bữa ăn ngon miệng và lành mạnh!
-
-*Thông tin chỉ mang tính tham khảo, không thay thế lời khuyên từ bác sĩ.*
-RECOMMENDATIONS: ${JSON.stringify(fallbackNames)}`;
+      aiResponseText = `Máy chủ AI tạm thời quá tải. Gợi ý nhanh cho bạn:\n\n${fallbackFoods.map(f => `- **${f.name}**`).join('\n')}\n\n⚠️ Tham khảo bác sĩ trước khi thay đổi chế độ ăn.\nRECOMMENDATIONS: ${JSON.stringify(fallbackNames)}`;
     }
 
     const { responseMessage, recommendedFoodNames } = extractRecommendedFoodNames(aiResponseText);
 
-    // Find food ObjectIds
     let recommendedFoods = [];
     if (recommendedFoodNames.length > 0) {
-      const foodsInDb = await Food.find({ name: { $in: recommendedFoodNames } });
+      const regexPatterns = recommendedFoodNames.map(
+        (name) => new RegExp(`^${name.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i')
+      );
+      // Chỉ lấy các món ĐANG CÓ SẴN (isAvailable: true) để hiển thị card trong chat
+      const foodsInDb = await Food.find({
+        name: { $in: regexPatterns },
+        isAvailable: { $ne: false },
+      }).select('_id');
       recommendedFoods = foodsInDb.map(f => f._id);
     }
 
-    // Save chat history
-    const chat = await AIChat.create({
-      user: user._id,
-      message,
-      response: responseMessage,
-      recommendedFoods
-    });
+    // Lưu lịch sử chat (người dùng có thể xem và tự xóa)
+    const chat = await AIChat.create({ user: user._id, message, response: responseMessage, recommendedFoods });
 
-    // Populate food info before sending back
+    // Lưu vĩnh viễn vào bảng log câu hỏi (AIQuestionLog - độc lập, không bị xóa theo lịch sử chat của user)
+    AIQuestionLog.create({
+      user: user._id,
+      userName: user.name || 'Khách hàng',
+      userEmail: user.email || '',
+      question: message,
+      aiResponse: responseMessage,
+      topics: detectQuestionTopics(message),
+      recommendedFoods,
+    }).catch((logErr) => console.error('Lỗi khi lưu AIQuestionLog:', logErr.message));
+
+    // Trả về kèm thông tin món ăn
     const populatedChat = await AIChat.findById(chat._id).populate('recommendedFoods', 'name images price nutrition healthTags');
 
     res.json(populatedChat);
@@ -265,14 +288,135 @@ RECOMMENDATIONS: ${JSON.stringify(fallbackNames)}`;
 
 // @desc    Get Chat History
 // @route   GET /api/ai/history
-// @access  Private
+// @access  Private (User gets own chats; Admin can get all chats with ?all=true or ?userId=...)
 export const getChatHistory = async (req, res) => {
   try {
-    const history = await AIChat.find({ user: req.user._id })
+    let filter = { user: req.user._id };
+
+    // Nếu là admin và có query all=true hoặc userId thì cho phép xem toàn bộ
+    if (req.user.role === 'admin' && (req.query.all === 'true' || req.query.userId)) {
+      filter = req.query.userId ? { user: req.query.userId } : {};
+    }
+
+    const history = await AIChat.find(filter)
+      .populate('user', 'name email avatar')
       .populate('recommendedFoods', 'name images price nutrition healthTags')
       .sort({ createdAt: -1 });
+
     res.json(history);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
+
+// @desc    Delete a single chat entry
+// @route   DELETE /api/ai/history/:id
+// @access  Private (User can delete own chat, Admin can delete any)
+export const deleteChatEntry = async (req, res) => {
+  try {
+    const chat = await AIChat.findById(req.params.id);
+    if (!chat) return res.status(404).json({ message: 'Không tìm thấy cuộc trò chuyện.' });
+
+    // Người dùng chỉ được xóa lịch sử của chính mình, Admin có thể xóa bất kỳ
+    if (chat.user.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Không có quyền xóa cuộc trò chuyện này.' });
+    }
+
+    await chat.deleteOne();
+    res.json({ message: 'Đã xóa cuộc trò chuyện thành công.' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Clear chat history
+// @route   DELETE /api/ai/history
+// @access  Private (User clears own chats, Admin can clear all or specific user)
+export const clearChatHistory = async (req, res) => {
+  try {
+    let filter = { user: req.user._id };
+
+    if (req.user.role === 'admin') {
+      if (req.query.all === 'true') {
+        filter = {};
+      } else if (req.query.userId) {
+        filter = { user: req.query.userId };
+      }
+    }
+
+    const result = await AIChat.deleteMany(filter);
+    res.json({ message: `Đã xóa ${result.deletedCount} cuộc trò chuyện.` });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Get AI Question Logs (for Admin analytics & management)
+// @route   GET /api/ai/logs
+// @access  Private/Admin
+export const getAIQuestionLogs = async (req, res) => {
+  try {
+    const pageSize = Math.min(Number(req.query.limit) || 20, 100);
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const topic = req.query.topic;
+    const search = req.query.search;
+
+    const query = {};
+    if (topic && topic !== 'all') {
+      query.topics = topic;
+    }
+    if (search) {
+      query.$or = [
+        { question: { $regex: search, $options: 'i' } },
+        { userName: { $regex: search, $options: 'i' } },
+        { userEmail: { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    const count = await AIQuestionLog.countDocuments(query);
+    const logs = await AIQuestionLog.find(query)
+      .populate('user', 'name email avatar phone')
+      .populate('recommendedFoods', 'name price images nutrition')
+      .sort({ createdAt: -1 })
+      .limit(pageSize)
+      .skip(pageSize * (page - 1));
+
+    res.json({
+      logs,
+      page,
+      pages: Math.ceil(count / pageSize),
+      total: count,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Delete a single AI question log (Admin only)
+// @route   DELETE /api/ai/logs/:id
+// @access  Private/Admin
+export const deleteAIQuestionLog = async (req, res) => {
+  try {
+    const log = await AIQuestionLog.findById(req.params.id);
+    if (!log) {
+      return res.status(404).json({ message: 'Không tìm thấy nhật ký câu hỏi.' });
+    }
+    await log.deleteOne();
+    res.json({ message: 'Đã xóa nhật ký câu hỏi AI thành công.' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Clear all AI question logs (Admin only)
+// @route   DELETE /api/ai/logs
+// @access  Private/Admin
+export const clearAIQuestionLogs = async (req, res) => {
+  try {
+    const result = await AIQuestionLog.deleteMany({});
+    res.json({ message: `Đã xóa toàn bộ ${result.deletedCount} nhật ký câu hỏi AI.` });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+

@@ -25,13 +25,13 @@ const NotFound = () => {
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
           <Link
             to="/"
-            className="bg-primary text-white px-8 py-3 rounded-full font-bold shadow-lg hover:bg-orange-600 transition-all hover:-translate-y-1"
+            className="bg-primary text-white px-8 py-3 rounded-full font-bold shadow-lg shadow-primary/20 hover:bg-primary-dark transition-all hover:-translate-y-1"
           >
             🏠 Về trang chủ
           </Link>
           <Link
             to="/foods"
-            className="border border-primary text-primary px-8 py-3 rounded-full font-bold hover:bg-orange-50 transition-all hover:-translate-y-1"
+            className="border border-primary text-primary px-8 py-3 rounded-full font-bold hover:bg-primary-light/40 transition-all hover:-translate-y-1"
           >
             🍜 Xem thực đơn
           </Link>

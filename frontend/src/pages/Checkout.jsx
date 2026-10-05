@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import axiosClient from '../api/axiosClient';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { CheckCircle, ArrowLeft, MapPin, CreditCard } from 'lucide-react';
 import { toast } from 'react-toastify';
 
@@ -31,6 +31,11 @@ const Checkout = () => {
   const [success, setSuccess] = useState(false);
 
   const totalAmount = cartItems.reduce((acc, item) => acc + item.price * item.quantity, 0);
+
+  // Guard: chưa đăng nhập → về trang login, sau khi login quay lại checkout
+  if (!user) {
+    return <Navigate to="/login" state={{ from: '/checkout' }} replace />;
+  }
 
   let discountAmount = 0;
   if (user?.tier === 'Kim Cương') {
@@ -130,7 +135,7 @@ const Checkout = () => {
           Cảm ơn bạn đã lựa chọn FoodCare. Đơn hàng đang được xử lý và sẽ sớm được giao đến bạn.
         </p>
         <div className="flex gap-3">
-          <Link to="/profile?tab=tracking" className="bg-primary text-white px-8 py-3 rounded-full font-bold shadow-lg hover:bg-orange-600 transition-all hover:-translate-y-1">
+          <Link to="/profile?tab=tracking" className="bg-primary text-white px-8 py-3 rounded-full font-bold shadow-lg shadow-primary/20 hover:bg-primary-dark transition-all hover:-translate-y-1">
             Theo dõi đơn hàng
           </Link>
           <Link to="/foods" className="bg-gray-100 text-gray-700 px-8 py-3 rounded-full font-bold hover:bg-gray-200 transition-all hover:-translate-y-1">
@@ -167,7 +172,7 @@ const Checkout = () => {
         <div className="lg:w-2/3">
           <form onSubmit={placeOrder} className="bg-white p-8 rounded-3xl shadow-xl border border-gray-100">
             <div className="flex items-center gap-3 mb-6 pb-5 border-b border-gray-100">
-              <div className="w-9 h-9 rounded-xl bg-orange-100 flex items-center justify-center">
+              <div className="w-9 h-9 rounded-xl bg-primary-light flex items-center justify-center">
                 <MapPin size={18} className="text-primary" />
               </div>
               <h3 className="text-lg font-bold text-dark">Thông tin giao hàng</h3>
@@ -275,20 +280,20 @@ const Checkout = () => {
               </div>
 
               <div className="flex items-center gap-3 mb-4 mt-8 pt-6 border-t border-gray-100">
-                <div className="w-9 h-9 rounded-xl bg-orange-100 flex items-center justify-center">
+                <div className="w-9 h-9 rounded-xl bg-primary-light flex items-center justify-center">
                   <CreditCard size={18} className="text-primary" />
                 </div>
                 <h3 className="text-lg font-bold text-dark">Phương thức thanh toán</h3>
               </div>
               <div className="space-y-3">
-                <label className={`flex items-center gap-4 p-4 border-2 rounded-2xl cursor-pointer transition-all ${paymentMethod === 'COD' ? 'bg-orange-50 border-primary shadow-sm' : 'border-gray-100 hover:border-gray-300 hover:bg-gray-50'}`}>
+                <label className={`flex items-center gap-4 p-4 border-2 rounded-2xl cursor-pointer transition-all ${paymentMethod === 'COD' ? 'bg-[#E8F5EE] border-primary shadow-sm' : 'border-gray-100 hover:border-gray-300 hover:bg-gray-50'}`}>
                   <input
                     type="radio"
                     name="payment"
                     value="COD"
                     checked={paymentMethod === 'COD'}
                     onChange={(e) => setPaymentMethod(e.target.value)}
-                    className="w-5 h-5 text-primary"
+                    className="w-5 h-5 text-primary accent-primary"
                   />
                   <span className="text-2xl">💵</span>
                   <div className="flex flex-col">
@@ -297,14 +302,14 @@ const Checkout = () => {
                   </div>
                 </label>
 
-                <label className={`flex items-center gap-4 p-4 border-2 rounded-2xl cursor-pointer transition-all ${paymentMethod === 'BANK' ? 'bg-orange-50 border-primary shadow-sm' : 'border-gray-100 hover:border-gray-300 hover:bg-gray-50'}`}>
+                <label className={`flex items-center gap-4 p-4 border-2 rounded-2xl cursor-pointer transition-all ${paymentMethod === 'BANK' ? 'bg-[#E8F5EE] border-primary shadow-sm' : 'border-gray-100 hover:border-gray-300 hover:bg-gray-50'}`}>
                   <input
                     type="radio"
                     name="payment"
                     value="BANK"
                     checked={paymentMethod === 'BANK'}
                     onChange={(e) => setPaymentMethod(e.target.value)}
-                    className="w-5 h-5 text-primary"
+                    className="w-5 h-5 text-primary accent-primary"
                   />
                   <span className="text-2xl">🏦</span>
                   <div className="flex flex-col">
@@ -314,9 +319,9 @@ const Checkout = () => {
                 </label>
 
                 {paymentMethod === 'BANK' && (
-                  <div className="p-4 bg-blue-50 border border-blue-100 rounded-xl ml-8 animate-fade-in">
-                    <p className="text-sm text-blue-800 mb-2">Vui lòng chuyển khoản tới thông tin sau. Đơn hàng sẽ được xác nhận ngay khi chúng tôi nhận được thanh toán.</p>
-                    <div className="bg-white p-3 rounded-lg border border-blue-100">
+                  <div className="p-4 bg-emerald-50/60 border border-emerald-100 rounded-xl ml-8 animate-fade-in">
+                    <p className="text-sm text-emerald-900 mb-2">Vui lòng chuyển khoản tới thông tin sau. Đơn hàng sẽ được xác nhận ngay khi chúng tôi nhận được thanh toán.</p>
+                    <div className="bg-white p-3 rounded-lg border border-emerald-100">
                       <p><strong>Ngân hàng:</strong> Vietcombank (VCB)</p>
                       <p><strong>Số tài khoản:</strong> 1234567890</p>
                       <p><strong>Chủ tài khoản:</strong> FOODCARE COMPANY</p>
@@ -325,14 +330,14 @@ const Checkout = () => {
                   </div>
                 )}
 
-                <label className={`flex items-center gap-4 p-4 border-2 rounded-2xl cursor-pointer transition-all ${paymentMethod === 'MOMO' ? 'bg-orange-50 border-primary shadow-sm' : 'border-gray-100 hover:border-gray-300 hover:bg-gray-50'}`}>
+                <label className={`flex items-center gap-4 p-4 border-2 rounded-2xl cursor-pointer transition-all ${paymentMethod === 'MOMO' ? 'bg-[#E8F5EE] border-primary shadow-sm' : 'border-gray-100 hover:border-gray-300 hover:bg-gray-50'}`}>
                   <input
                     type="radio"
                     name="payment"
                     value="MOMO"
                     checked={paymentMethod === 'MOMO'}
                     onChange={(e) => setPaymentMethod(e.target.value)}
-                    className="w-5 h-5 text-primary"
+                    className="w-5 h-5 text-primary accent-primary"
                   />
                   <span className="text-2xl">💳</span>
                   <div className="flex flex-col">
@@ -355,7 +360,7 @@ const Checkout = () => {
             <button
               type="submit"
               disabled={loading}
-              className="w-full mt-8 bg-primary text-white py-4 rounded-xl font-bold text-lg shadow-lg hover:bg-orange-600 hover:-translate-y-0.5 transition-all disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="w-full mt-8 bg-primary text-white py-4 rounded-xl font-bold text-lg shadow-lg hover:bg-primary-dark hover:-translate-y-0.5 transition-all disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {loading ? (
                 <>

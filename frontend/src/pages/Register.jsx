@@ -80,8 +80,8 @@ const Register = () => {
     border: '1px solid rgba(255,255,255,0.12)',
   };
   const onFocus = (e) => {
-    e.target.style.border = '1px solid rgba(251,146,60,0.7)';
-    e.target.style.boxShadow = '0 0 0 3px rgba(251,146,60,0.15)';
+    e.target.style.border = '1px solid rgba(22,132,91,0.8)';
+    e.target.style.boxShadow = '0 0 0 3px rgba(22,132,91,0.2)';
   };
   const onBlur = (e) => {
     e.target.style.border = '1px solid rgba(255,255,255,0.12)';
@@ -404,9 +404,9 @@ const Register = () => {
               className="w-full py-3 rounded-xl font-bold text-white text-sm shadow-lg transition-all hover:-translate-y-0.5 disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 mt-1"
               style={{
                 background: isLoading
-                  ? 'rgba(52,211,153,0.5)'
-                  : 'linear-gradient(135deg,#059669 0%,#10b981 50%,#34d399 100%)',
-                boxShadow: '0 8px 32px rgba(16,185,129,0.45)',
+                  ? 'rgba(22,132,91,0.6)'
+                  : 'linear-gradient(135deg,#16845B 0%,#116344 100%)',
+                boxShadow: '0 8px 32px rgba(22,132,91,0.45)',
               }}
             >
               {isLoading ? (

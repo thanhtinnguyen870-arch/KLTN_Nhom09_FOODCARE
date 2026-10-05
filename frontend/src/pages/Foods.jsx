@@ -115,14 +115,14 @@ const Foods = () => {
             type="text"
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="Tìm món ăn..."
-            className="h-13 w-full rounded-full border border-orange-100 bg-white pl-12 pr-12 text-base font-medium text-dark shadow-sm outline-none transition-all duration-300 focus:border-primary focus:shadow-float"
+            placeholder="Tìm món ăn dinh dưỡng..."
+            className="h-13 w-full rounded-full border border-[#E8EEE9] bg-white pl-12 pr-12 text-base font-medium text-dark shadow-sm outline-none transition-all duration-300 focus:border-primary focus:ring-2 focus:ring-primary/20"
           />
           {searchTerm && (
             <button
               type="button"
               onClick={() => setSearchTerm('')}
-              className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-orange-50 hover:text-primary"
+              className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-primary-light hover:text-primary"
               aria-label="Xóa tìm kiếm"
             >
               <X size={18} />
@@ -138,7 +138,7 @@ const Foods = () => {
             if (debouncedSearchTerm.trim()) nextParams.keyword = debouncedSearchTerm.trim();
             setSearchParams(nextParams);
           }}
-          className={`px-5 py-2 rounded-full font-medium shadow-sm transition-all duration-300 ease-out hover:-translate-y-0.5 active:scale-95 ${selectedCategory === '' ? 'bg-primary text-white shadow-float scale-105' : 'bg-white text-gray-700 hover:bg-gray-100 hover:shadow-md'}`}
+          className={`px-5 py-2.5 rounded-full font-bold text-sm shadow-sm transition-all duration-300 ease-out hover:-translate-y-0.5 active:scale-95 ${selectedCategory === '' ? 'bg-primary text-white shadow-float scale-105' : 'bg-white text-gray-700 border border-[#E8EEE9] hover:bg-[#F0F8F3] hover:text-primary hover:border-primary/30'}`}
         >
           Tất cả
         </button>
@@ -150,7 +150,7 @@ const Foods = () => {
               if (debouncedSearchTerm.trim()) nextParams.keyword = debouncedSearchTerm.trim();
               setSearchParams(nextParams);
             }}
-            className={`px-5 py-2 rounded-full font-medium shadow-sm transition-all duration-300 ease-out hover:-translate-y-0.5 active:scale-95 ${selectedCategory === cat._id ? 'bg-primary text-white shadow-float scale-105' : 'bg-white text-gray-700 hover:bg-gray-100 hover:shadow-md'}`}
+            className={`px-5 py-2.5 rounded-full font-bold text-sm shadow-sm transition-all duration-300 ease-out hover:-translate-y-0.5 active:scale-95 ${selectedCategory === cat._id ? 'bg-primary text-white shadow-float scale-105' : 'bg-white text-gray-700 border border-[#E8EEE9] hover:bg-[#F0F8F3] hover:text-primary hover:border-primary/30'}`}
           >
             {cat.name}
           </button>
@@ -165,7 +165,7 @@ const Foods = () => {
       ) : (
         <div className="relative min-h-[520px]">
           {isSwitchingCategory && (
-            <div className="absolute right-0 top-0 z-10 rounded-full border border-orange-100 bg-white/90 px-4 py-2 text-sm font-semibold text-primary shadow-sm backdrop-blur">
+            <div className="absolute right-0 top-0 z-10 rounded-full border border-[#E8EEE9] bg-white/95 px-4 py-2 text-sm font-semibold text-primary shadow-sm backdrop-blur">
               Đang cập nhật...
             </div>
           )}
@@ -182,17 +182,29 @@ const Foods = () => {
               style={{ animationDelay: `${Math.min(index * 35, 210)}ms` }}
             >
               <Link to={`/food/${food._id}`} state={{ from: returnToFoods }} className="block relative h-56 overflow-hidden">
-                <img src={food.images[0]} onError={(e) => { e.target.onerror = null; e.target.src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?q=80&w=800&auto=format&fit=crop"; }} 
-                  alt={food.name} 
-                  className="w-full h-full object-cover transition-transform duration-700 hover:scale-110"
+                <img src={food.images[0]} onError={(e) => { e.target.onerror = null; e.target.src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?q=80&w=800&auto=format&fit=crop"; }}
+                  alt={food.name}
+                  loading="lazy"
+                  decoding="async"
+                  className={`w-full h-full object-cover transition-transform duration-700 hover:scale-110 ${
+                    !food.isAvailable ? 'opacity-40 grayscale' : ''
+                  }`}
                 />
-                {food.healthTags && food.healthTags.length > 0 && (
+                {/* Overlay Tạm hết */}
+                {!food.isAvailable && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/30 backdrop-blur-[1px]">
+                    <span className="bg-gray-900/80 text-white text-sm font-bold px-4 py-1.5 rounded-full tracking-wide shadow-lg border border-white/20">
+                      🚫 Tạm hết
+                    </span>
+                  </div>
+                )}
+                {food.isAvailable && food.healthTags && food.healthTags.length > 0 && (
                   <div className="absolute top-3 left-3 bg-white/90 backdrop-blur-sm px-3 py-1 rounded-full text-xs font-bold text-healthy shadow-sm">
                     {food.healthTags[0]}
                   </div>
                 )}
               </Link>
-              <div className="p-5 flex flex-col flex-1">
+              <div className={`p-5 flex flex-col flex-1 ${!food.isAvailable ? 'opacity-60' : ''}`}>
                 <Link to={`/food/${food._id}`} state={{ from: returnToFoods }}>
                   <h3 className="font-bold text-xl mb-1 hover:text-primary transition-colors line-clamp-1">{food.name}</h3>
                 </Link>
@@ -215,9 +227,11 @@ const Foods = () => {
                 )}
 
                 <div className="flex justify-between items-center mt-auto">
-                  <span className="font-extrabold text-lg text-primary">{food.price.toLocaleString()}đ</span>
+                  <span className={`font-extrabold text-lg ${food.isAvailable ? 'text-primary' : 'text-gray-400 line-through'}`}>
+                    {food.price.toLocaleString()}đ
+                  </span>
                   <div className="flex items-center gap-2">
-                    {user && user.role !== 'admin' && (
+                    {user && user.role !== 'admin' && food.isAvailable && (
                       <button
                         onClick={(e) => { e.preventDefault(); addFavorite(food); }}
                         className={`w-10 h-10 rounded-full flex items-center justify-center transition-all border ${
@@ -230,13 +244,16 @@ const Foods = () => {
                         <Heart size={17} fill={isFavorited(food._id) ? 'currentColor' : 'none'} />
                       </button>
                     )}
-                    {user?.role !== 'admin' && (
+                    {user?.role !== 'admin' && food.isAvailable && (
                       <button
                         onClick={() => addToCart(food)}
                         className="w-10 h-10 bg-dark text-white rounded-full flex items-center justify-center hover:bg-primary transition-colors"
                       >
                         <ShoppingCart size={18} />
                       </button>
+                    )}
+                    {!food.isAvailable && (
+                      <span className="text-xs font-semibold text-gray-400 italic">Không khả dụng</span>
                     )}
                   </div>
                 </div>

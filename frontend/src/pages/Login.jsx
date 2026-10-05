@@ -37,14 +37,21 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const googleButtonRef = useRef(null);
-  const { login, googleLogin } = useAuth();
+  const { user, login, googleLogin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
-  const redirectAfterLogin = useCallback((user) => {
-    const redirectPath = location.state?.from || (user?.role === 'admin' ? '/admin' : '/');
+  const redirectAfterLogin = useCallback((targetUser) => {
+    const redirectPath = location.state?.from || (targetUser?.role === 'admin' ? '/admin' : '/');
     navigate(redirectPath, { replace: true });
   }, [location.state, navigate]);
+
+  // Tự động chuyển hướng nếu người dùng đã có phiên đăng nhập hợp lệ
+  useEffect(() => {
+    if (user) {
+      redirectAfterLogin(user);
+    }
+  }, [user, redirectAfterLogin]);
 
   /* lock scroll while on login page */
   useEffect(() => {
@@ -59,47 +66,64 @@ const Login = () => {
   useEffect(() => {
     if (!GOOGLE_CLIENT_ID) return undefined;
 
-    const initializeGoogle = () => {
-      if (!window.google?.accounts?.id || !googleButtonRef.current) return;
+    let isSubscribed = true;
+    let pollInterval = null;
 
-      window.google.accounts.id.initialize({
-        client_id: GOOGLE_CLIENT_ID,
-        callback: async ({ credential }) => {
-          const result = await googleLogin(credential);
-          if (result.success) {
-            redirectAfterLogin(result.user);
-          } else {
-            toast.error(result.message);
-          }
-        },
-      });
+    const renderGoogleBtn = () => {
+      if (!isSubscribed || !googleButtonRef.current || !window.google?.accounts?.id) return false;
 
-      googleButtonRef.current.innerHTML = '';
-      window.google.accounts.id.renderButton(googleButtonRef.current, {
-        type: 'icon',
-        theme: 'filled_blue',
-        size: 'large',
-        shape: 'circle',
-        locale: 'vi',
-      });
+      try {
+        window.google.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          auto_select: false,
+          cancel_on_tap_outside: true,
+          callback: async ({ credential }) => {
+            if (!credential) return;
+            setIsLoading(true);
+            try {
+              const result = await googleLogin(credential);
+              if (result.success) {
+                redirectAfterLogin(result.user);
+              } else {
+                toast.error(result.message);
+              }
+            } finally {
+              setIsLoading(false);
+            }
+          },
+        });
+
+        googleButtonRef.current.innerHTML = '';
+        window.google.accounts.id.renderButton(googleButtonRef.current, {
+          type: 'icon',
+          theme: 'filled_blue',
+          size: 'large',
+          shape: 'circle',
+          locale: 'vi',
+        });
+        return true;
+      } catch (err) {
+        console.error('Lỗi khởi tạo Google button:', err);
+        return false;
+      }
     };
 
-    const existingScript = document.querySelector('script[data-google-identity]');
-    if (existingScript) {
-      initializeGoogle();
-      existingScript.addEventListener('load', initializeGoogle);
-      return () => existingScript.removeEventListener('load', initializeGoogle);
+    // Thử khởi tạo ngay
+    if (!renderGoogleBtn()) {
+      // Nếu SDK Google chưa load xong, poll định kỳ mỗi 80ms (tối đa 30 lần = 2.4s)
+      let attempts = 0;
+      pollInterval = setInterval(() => {
+        attempts += 1;
+        if (renderGoogleBtn() || attempts >= 30) {
+          clearInterval(pollInterval);
+        }
+      }, 80);
     }
 
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.defer = true;
-    script.dataset.googleIdentity = 'true';
-    script.addEventListener('load', initializeGoogle);
-    document.head.appendChild(script);
-
-    return () => script.removeEventListener('load', initializeGoogle);
+    return () => {
+      isSubscribed = false;
+      if (pollInterval) clearInterval(pollInterval);
+    };
   }, [googleLogin, redirectAfterLogin]);
 
   const handleSubmit = async (event) => {
@@ -174,9 +198,9 @@ const Login = () => {
                 position:'absolute',
                 width: sz, height: sz,
                 borderRadius:'50%',
-                border: `1px solid rgba(251,146,60,${0.12 - i*0.02})`,
+                border: `1px solid rgba(22,132,91,${0.12 - i*0.02})`,
                 animation: `spin-slow ${28+i*14}s linear ${i%2===0?'':'reverse'} infinite`,
-                boxShadow: `0 0 ${20+i*8}px rgba(251,146,60,${0.06 - i*0.01}) inset`,
+                boxShadow: `0 0 ${20+i*8}px rgba(22,132,91,${0.06 - i*0.01}) inset`,
               }}
             />
           ))}
@@ -184,10 +208,10 @@ const Login = () => {
 
         {/* ── Drifting blob lights ── */}
         {[
-          { color:'rgba(251,146,60,0.18)', size:420, x:'10%', y:'5%',  dur:'22s' },
+          { color:'rgba(22,132,91,0.22)', size:420, x:'10%', y:'5%',  dur:'22s' },
           { color:'rgba(139,92,246,0.15)', size:380, x:'65%', y:'60%', dur:'28s', delay:'4s' },
           { color:'rgba(34,211,238,0.12)', size:320, x:'75%', y:'5%',  dur:'20s', delay:'8s' },
-          { color:'rgba(251,191,36,0.10)', size:280, x:'5%',  y:'60%', dur:'25s', delay:'2s' },
+          { color:'rgba(16,185,129,0.15)', size:280, x:'5%',  y:'60%', dur:'25s', delay:'2s' },
         ].map((b, i) => (
           <div key={i} style={{
             position:'absolute', borderRadius:'50%',
@@ -205,7 +229,7 @@ const Login = () => {
               left: `${p.x}%`, top: `${p.y}%`,
               width: p.size, height: p.size,
               background: p.id % 3 === 0
-                ? 'rgba(251,146,60,0.8)'
+                ? 'rgba(22,132,91,0.8)'
                 : p.id % 3 === 1
                 ? 'rgba(139,92,246,0.7)'
                 : 'rgba(34,211,238,0.7)',
@@ -270,7 +294,7 @@ const Login = () => {
                     fontFamily: 'system-ui, sans-serif',
                     color: 'transparent',
                     WebkitTextStroke: `1.5px rgba(255,255,255,${row.op * 3})`,
-                    textShadow: `0 0 40px rgba(251,146,60,${row.op * 2}), 0 0 80px rgba(251,146,60,${row.op})`,
+                    textShadow: `0 0 40px rgba(22,132,91,${row.op * 2}), 0 0 80px rgba(22,132,91,${row.op})`,
                     opacity: row.op * 10,
                     userSelect: 'none',
                   }}>
@@ -307,7 +331,7 @@ const Login = () => {
           {/* Heading */}
           <h1 className="text-3xl font-black mb-1"
             style={{
-              background: 'linear-gradient(90deg,#fb923c,#fbbf24,#fb923c)',
+              background: 'linear-gradient(90deg,#16845B,#10b981,#34d399,#16845B)',
               backgroundSize: '200% auto',
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
@@ -317,7 +341,7 @@ const Login = () => {
           </h1>
           <p className="text-white/50 text-sm mb-8">
             Chưa có tài khoản?{' '}
-            <Link to="/register" className="text-orange-400 font-semibold hover:text-orange-300 transition-colors">
+            <Link to="/register" className="text-emerald-400 font-semibold hover:text-emerald-300 transition-colors">
               Đăng ký ngay
             </Link>
           </p>
@@ -341,7 +365,7 @@ const Login = () => {
                   background: 'rgba(255,255,255,0.08)',
                   border: '1px solid rgba(255,255,255,0.12)',
                 }}
-                onFocus={e => { e.target.style.border='1px solid rgba(251,146,60,0.7)'; e.target.style.boxShadow='0 0 0 3px rgba(251,146,60,0.15)'; }}
+                onFocus={e => { e.target.style.border='1px solid rgba(22,132,91,0.8)'; e.target.style.boxShadow='0 0 0 3px rgba(22,132,91,0.2)'; }}
                 onBlur={e  => { e.target.style.border='1px solid rgba(255,255,255,0.12)'; e.target.style.boxShadow='none'; }}
               />
             </div>
@@ -364,7 +388,7 @@ const Login = () => {
                     background: 'rgba(255,255,255,0.08)',
                     border: '1px solid rgba(255,255,255,0.12)',
                   }}
-                  onFocus={e => { e.target.style.border='1px solid rgba(251,146,60,0.7)'; e.target.style.boxShadow='0 0 0 3px rgba(251,146,60,0.15)'; }}
+                  onFocus={e => { e.target.style.border='1px solid rgba(22,132,91,0.8)'; e.target.style.boxShadow='0 0 0 3px rgba(22,132,91,0.2)'; }}
                   onBlur={e  => { e.target.style.border='1px solid rgba(255,255,255,0.12)'; e.target.style.boxShadow='none'; }}
                 />
                 <button
@@ -384,9 +408,9 @@ const Login = () => {
               className="w-full py-3.5 rounded-xl font-bold text-white text-sm shadow-lg transition-all hover:-translate-y-0.5 disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 mt-2"
               style={{
                 background: isLoading
-                  ? 'rgba(251,146,60,0.6)'
-                  : 'linear-gradient(135deg,#f97316 0%,#fb923c 50%,#fbbf24 100%)',
-                boxShadow: '0 8px 32px rgba(249,115,22,0.45)',
+                  ? 'rgba(22,132,91,0.6)'
+                  : 'linear-gradient(135deg,#16845B 0%,#116344 100%)',
+                boxShadow: '0 8px 32px rgba(22,132,91,0.45)',
               }}
             >
               {isLoading ? (
@@ -411,11 +435,15 @@ const Login = () => {
           {/* Google */}
           <div className="flex justify-center">
             <div
-              ref={googleButtonRef}
-              className="transition hover:scale-110"
-              style={{ borderRadius: '50%', boxShadow: '0 4px 20px rgba(66,133,244,0.5)' }}
-              title="Đăng nhập bằng Google"
-            ></div>
+              className="flex items-center justify-center rounded-full transition-transform hover:scale-105"
+              style={{ boxShadow: '0 4px 20px rgba(66,133,244,0.45)' }}
+            >
+              <div
+                ref={googleButtonRef}
+                className="flex items-center justify-center"
+                title="Đăng nhập bằng Google"
+              ></div>
+            </div>
           </div>
 
           {/* Footer */}

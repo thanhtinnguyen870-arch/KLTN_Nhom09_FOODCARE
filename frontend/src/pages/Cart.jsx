@@ -31,10 +31,10 @@ const Cart = () => {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center p-4">
         <div className="relative mb-8">
-          <div className="w-40 h-40 rounded-full bg-orange-50 flex items-center justify-center">
+          <div className="w-40 h-40 rounded-full bg-primary-light flex items-center justify-center">
             <ShoppingBag size={72} className="text-primary opacity-30" />
           </div>
-          <div className="absolute -top-2 -right-2 w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-xl">🥗</div>
+          <div className="absolute -top-2 -right-2 w-10 h-10 rounded-full bg-[#E8F5EE] flex items-center justify-center text-xl">🥗</div>
         </div>
         <h2 className="text-2xl font-bold text-gray-800 mb-3">Giỏ hàng trống</h2>
         <p className="text-gray-500 mb-8 text-center max-w-sm">
@@ -42,7 +42,7 @@ const Cart = () => {
         </p>
         <Link
           to="/foods"
-          className="bg-primary text-white px-10 py-3 rounded-full font-bold shadow-lg hover:bg-orange-600 transition-all hover:-translate-y-1"
+          className="bg-primary text-white px-10 py-3 rounded-full font-bold shadow-lg hover:bg-primary-dark transition-all hover:-translate-y-1"
         >
           Xem thực đơn
         </Link>
@@ -168,7 +168,7 @@ const Cart = () => {
 
             <Link
               to="/checkout"
-              className="w-full bg-primary text-white py-4 rounded-xl font-bold text-lg shadow-md flex items-center justify-center gap-2 hover:bg-orange-600 transition-all hover:-translate-y-0.5 hover:shadow-lg"
+              className="w-full bg-primary text-white py-4 rounded-xl font-bold text-lg shadow-md flex items-center justify-center gap-2 hover:bg-primary-dark transition-all hover:-translate-y-0.5 hover:shadow-lg"
             >
               Thanh toán <ArrowRight size={20} />
             </Link>

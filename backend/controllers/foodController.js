@@ -14,20 +14,15 @@ const isValidRating = (rating) => {
 export const getFoods = async (req, res) => {
   try {
     const keyword = req.query.keyword
-      ? {
-          name: {
-            $regex: req.query.keyword,
-            $options: 'i',
-          },
-        }
+      ? { name: { $regex: req.query.keyword, $options: 'i' } }
       : {};
-
     const category = req.query.category ? { category: req.query.category } : {};
-    
-    // Thêm các filter khác nếu cần (ví dụ: tag sức khỏe, max price)
-    const filters = { ...keyword, ...category, isAvailable: true };
-    
+    const filters = { ...keyword, ...category };
+
     const foods = await Food.find(filters).populate('category', 'name slug');
+
+    // Cache 60 giây phía client, 30 giây stale-while-revalidate
+    res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=30');
     res.json(foods);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -73,7 +68,7 @@ export const getFoodBySlug = async (req, res) => {
 // @access  Private
 export const createFoodReview = async (req, res) => {
   try {
-    const { rating, comment } = req.body;
+    const { rating, comment, mediaUrls = [] } = req.body;
     const food = await Food.findById(req.params.id);
 
     if (food) {
@@ -101,12 +96,20 @@ export const createFoodReview = async (req, res) => {
         return res.status(400).json({ message: 'Bạn đã sử dụng hết lượt đánh giá cho món này. Hãy mua thêm để tiếp tục đánh giá nhé!' });
       }
 
+      const validMediaUrls = Array.isArray(mediaUrls)
+        ? mediaUrls
+            .filter((m) => m && typeof m.url === 'string' && m.url.startsWith('http'))
+            .map((m) => ({ url: m.url, type: m.type === 'video' ? 'video' : 'image' }))
+            .slice(0, 5)
+        : [];
+
       const review = await Review.create({
         name: req.user.name,
         rating: Number(rating),
         comment: comment || '',
         food: food._id,
         user: req.user._id,
+        images: validMediaUrls,
       });
 
       // Tạo thông báo cho admin
@@ -144,7 +147,7 @@ export const createFoodReview = async (req, res) => {
 // @access  Private
 export const updateFoodReview = async (req, res) => {
   try {
-    const { rating, comment } = req.body;
+    const { rating, comment, mediaUrls } = req.body;
     const review = await Review.findById(req.params.reviewId);
 
     if (!review) {
@@ -165,6 +168,14 @@ export const updateFoodReview = async (req, res) => {
 
     if (rating !== undefined) review.rating = Number(rating);
     if (comment !== undefined) review.comment = comment;
+    if (mediaUrls !== undefined) {
+      review.images = Array.isArray(mediaUrls)
+        ? mediaUrls
+            .filter((m) => m && typeof m.url === 'string' && m.url.startsWith('http'))
+            .map((m) => ({ url: m.url, type: m.type === 'video' ? 'video' : 'image' }))
+            .slice(0, 5)
+        : [];
+    }
 
     await review.save();
 

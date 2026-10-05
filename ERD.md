@@ -1,6 +1,6 @@
 # Tong hop Database de ve ERD
 
-Du an su dung **MongoDB + Mongoose**, gom 7 collection chinh:
+Du an su dung **MongoDB + Mongoose**, gom 8 collection chinh:
 
 1. `users`
 2. `categories`
@@ -9,6 +9,7 @@ Du an su dung **MongoDB + Mongoose**, gom 7 collection chinh:
 5. `reviews`
 6. `notifications`
 7. `aichats`
+8. `aiquestionlogs` (Bảng log lưu trữ vĩnh viễn toàn bộ câu hỏi tư vấn AI)
 
 > Mongoose tu dong tao `_id: ObjectId` cho moi document va `createdAt`, `updatedAt`
 > cho cac schema dang bat `timestamps`.
@@ -154,6 +155,23 @@ Du an su dung **MongoDB + Mongoose**, gom 7 collection chinh:
 | `createdAt` | Date | Tu dong |
 | `updatedAt` | Date | Tu dong |
 
+## 8. AIQuestionLogs
+
+Bảng lưu trữ vĩnh viễn (insert-only) toàn bộ các câu hỏi mà người dùng gửi cho Chatbot AI, phục vụ Admin thống kê nhu cầu dinh dưỡng, bệnh lý, xu hướng người dùng và không bị xóa khi người dùng xóa lịch sử cá nhân.
+
+| Truong | Kieu | Rang buoc / Ghi chu |
+|---|---|---|
+| `_id` | ObjectId | PK |
+| `user` | ObjectId | Tuy chon, FK -> `users._id` |
+| `userName` | String | Mac dinh `'Khách hàng'` |
+| `userEmail` | String | Mac dinh `''` |
+| `question` | String | Bat buoc, noi dung cau hoi |
+| `aiResponse` | String | Noi dung phan hoi cua AI |
+| `topics` | String[] | Tag chu de tu dong: 'Tiểu đường', 'Giảm cân', 'Ăn chay'... |
+| `recommendedFoods` | ObjectId[] | FK -> `foods._id` |
+| `createdAt` | Date | Tu dong, co Index |
+| `updatedAt` | Date | Tu dong |
+
 ## Cac moi quan he
 
 | Tu | Quan he | Den | FK |
@@ -162,12 +180,14 @@ Du an su dung **MongoDB + Mongoose**, gom 7 collection chinh:
 | User | 1 - N | Review | `reviews.user` |
 | User | 1 - N | Notification | `notifications.user` (tuy chon) |
 | User | 1 - N | AIChat | `aichats.user` |
+| User | 1 - N | AIQuestionLog | `aiquestionlogs.user` (tuy chon) |
 | Category | 1 - N | Food | `foods.category` |
 | Food | 1 - N | Review | `reviews.food` |
 | Food | 1 - N | Notification | `notifications.food` (tuy chon) |
 | User | N - N | Food | `users.favoriteFoods[]` |
 | Order | N - N | Food | `orders.items[].food` |
 | AIChat | N - N | Food | `aichats.recommendedFoods[]` |
+| AIQuestionLog | N - N | Food | `aiquestionlogs.recommendedFoods[]` |
 
 ## Mermaid ERD
 
@@ -177,6 +197,7 @@ erDiagram
     USER ||--o{ REVIEW : writes
     USER o|--o{ NOTIFICATION : receives
     USER ||--o{ AICHAT : creates
+    USER o|--o{ AIQUESTIONLOG : logs
     USER }o--o{ FOOD : favorites
 
     CATEGORY ||--o{ FOOD : contains
@@ -185,6 +206,7 @@ erDiagram
     FOOD o|--o{ NOTIFICATION : referenced_by
     ORDER }o--o{ FOOD : contains
     AICHAT }o--o{ FOOD : recommends
+    AIQUESTIONLOG }o--o{ FOOD : recommends
 
     USER {
         ObjectId _id PK
@@ -286,6 +308,19 @@ erDiagram
         ObjectId user FK
         String message
         String response
+        ObjectIdArray recommendedFoods FK
+        Date createdAt
+        Date updatedAt
+    }
+
+    AIQUESTIONLOG {
+        ObjectId _id PK
+        ObjectId user FK
+        String userName
+        String userEmail
+        String question
+        String aiResponse
+        StringArray topics
         ObjectIdArray recommendedFoods FK
         Date createdAt
         Date updatedAt

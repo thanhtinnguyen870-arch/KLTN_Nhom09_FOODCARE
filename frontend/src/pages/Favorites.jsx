@@ -68,7 +68,7 @@ const Favorites = () => {
           </p>
           <Link
             to="/foods"
-            className="bg-primary text-white px-8 py-3 rounded-xl font-bold hover:bg-orange-600 transition-colors shadow-lg"
+            className="bg-primary text-white px-8 py-3 rounded-xl font-bold hover:bg-primary-dark transition-colors shadow-lg"
           >
             Khám phá thực đơn
           </Link>
@@ -117,7 +117,7 @@ const Favorites = () => {
                 {/* Nutrition quick view */}
                 {food.nutrition?.calories && (
                   <div className="flex gap-2 mb-3 text-xs text-gray-500">
-                    <span className="bg-orange-50 text-orange-600 px-2 py-0.5 rounded-full font-semibold">
+                    <span className="bg-primary-light text-primary px-2 py-0.5 rounded-full font-semibold">
                       🔥 {food.nutrition.calories} kcal
                     </span>
                     {food.nutrition?.protein && (

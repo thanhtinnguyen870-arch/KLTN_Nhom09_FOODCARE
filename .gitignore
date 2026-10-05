@@ -34,3 +34,7 @@ Thumbs.db
 # Runtime uploads
 backend/uploads/avatars/*
 !backend/uploads/avatars/.gitkeep
+backend/uploads/foods/*
+!backend/uploads/foods/.gitkeep
+backend/uploads/reviews/*
+!backend/uploads/reviews/.gitkeep

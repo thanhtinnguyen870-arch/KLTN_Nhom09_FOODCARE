@@ -7,10 +7,15 @@ const AuthContext = createContext();
 const getStoredUser = () => {
   try {
     const userInfo = localStorage.getItem('userInfo');
+    const token = localStorage.getItem('token');
+    if (token) {
+      axiosClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    }
     return userInfo ? JSON.parse(userInfo) : null;
   } catch {
     localStorage.removeItem('userInfo');
     localStorage.removeItem('token');
+    delete axiosClient.defaults.headers.common['Authorization'];
     return null;
   }
 };
@@ -30,38 +35,55 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const storeAuthenticatedUser = (data) => {
+    syncedUserIdRef.current = data._id;
+    currentUserIdRef.current = data._id;
     setUser(data);
     localStorage.setItem('userInfo', JSON.stringify(data));
     localStorage.setItem('token', data.token);
+    axiosClient.defaults.headers.common['Authorization'] = `Bearer ${data.token}`;
   };
 
-  // Sync user tier/totalSpent once per session (only when userId changes, not on every render)
+  // Ref để track userId hiện tại (tránh stale closure trong async callback)
+  const currentUserIdRef = useRef(user?._id ?? null);
+  useEffect(() => {
+    currentUserIdRef.current = user?._id ?? null;
+  }, [user?._id]);
+
+  // Sync tier/totalSpent một lần khi userId thay đổi (login mới hoặc tải trang)
   useEffect(() => {
     const token = localStorage.getItem('token');
     const userId = user?._id;
 
-    // Only sync if we have a token+user AND haven't synced for this user yet
+    // Chỉ sync khi có token + userId và chưa sync cho userId này
     if (!token || !userId || syncedUserIdRef.current === userId) return;
 
     syncedUserIdRef.current = userId;
 
     axiosClient.get('/auth/me').then(({ data }) => {
-      if (data.totalSpent !== user?.totalSpent || data.tier !== user?.tier) {
+      // Kiểm tra userId vẫn còn khớp trước khi cập nhật (tránh race condition)
+      if (currentUserIdRef.current !== userId) return;
+      if (data.totalSpent !== undefined || data.tier !== undefined) {
         updateUser({ totalSpent: data.totalSpent, tier: data.tier });
       }
     }).catch((error) => {
-      if ([401, 403].includes(error.response?.status)) {
+      // Chỉ xóa session khi userId vẫn khớp VÀ lỗi 401 xác thực không thành công
+      if (currentUserIdRef.current !== userId) return;
+      if (error.response?.status === 401) {
         syncedUserIdRef.current = null;
+        currentUserIdRef.current = null;
         setUser(null);
         localStorage.removeItem('userInfo');
         localStorage.removeItem('token');
-        return;
+        delete axiosClient.defaults.headers.common['Authorization'];
+      } else {
+        console.warn('Không thể đồng bộ dữ liệu người dùng (server local):', error.message);
       }
-      console.error('Failed to sync user data:', error);
     });
-  }, [user?._id, user?.tier, user?.totalSpent, updateUser]);
+  // Chỉ phụ thuộc vào user._id – KHÔNG thêm totalSpent/tier để tránh re-run vô tận
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?._id]);
 
-  const login = async (email, password) => {
+  const login = useCallback(async (email, password) => {
     try {
       const { data } = await axiosClient.post('/auth/login', { email, password });
       storeAuthenticatedUser(data);
@@ -70,9 +92,9 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       return { success: false, message: error.response?.data?.message || 'Đăng nhập thất bại.' };
     }
-  };
+  }, []);
 
-  const googleLogin = async (credential) => {
+  const googleLogin = useCallback(async (credential) => {
     try {
       const { data } = await axiosClient.post('/auth/google', { credential });
       storeAuthenticatedUser(data);
@@ -84,9 +106,9 @@ export const AuthProvider = ({ children }) => {
         message: error.response?.data?.message || 'Đăng nhập Google không thành công.',
       };
     }
-  };
+  }, []);
 
-  const register = async (name, email, password) => {
+  const register = useCallback(async (name, email, password) => {
     try {
       const { data } = await axiosClient.post('/auth/register', { name, email, password });
       storeAuthenticatedUser(data);
@@ -94,14 +116,17 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       return { success: false, message: error.response?.data?.message || 'Đăng ký thất bại.' };
     }
-  };
+  }, []);
 
-  const logout = () => {
+  const logout = useCallback(() => {
+    syncedUserIdRef.current = null;
+    currentUserIdRef.current = null;
     setUser(null);
     localStorage.removeItem('userInfo');
     localStorage.removeItem('token');
+    delete axiosClient.defaults.headers.common['Authorization'];
     toast.success('Đăng xuất thành công!');
-  };
+  }, []);
 
   return (
     <AuthContext.Provider value={{ user, loading, login, googleLogin, register, logout, updateUser }}>
