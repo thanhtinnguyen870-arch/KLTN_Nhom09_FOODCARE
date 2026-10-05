@@ -2,6 +2,8 @@ import OpenAI from 'openai';
 import Food from '../models/Food.js';
 import AIChat from '../models/AIChat.js';
 import AIQuestionLog from '../models/AIQuestionLog.js';
+import Order from '../models/Order.js';
+import User from '../models/User.js';
 
 const detectQuestionTopics = (text = '') => {
   const lower = text.toLowerCase();
@@ -12,6 +14,9 @@ const detectQuestionTopics = (text = '') => {
   if (/chay|thuần chay|vegetable|vegetarian/.test(lower)) topics.push('Ăn chay');
   if (/huyết áp|tim mạch|cholesterol/.test(lower)) topics.push('Tim mạch / Huyết áp');
   if (/dạ dày|tiêu hóa|đau bụng/.test(lower)) topics.push('Dạ dày / Tiêu hóa');
+  if (/đơn hàng|order|vận chuyển|giao hàng|shipper|ship|mua hàng/.test(lower)) topics.push('Đơn hàng & Giao vận');
+  if (/cân nặng|chiều cao|bao nhiêu kg|thể trạng|bmi|hồ sơ|sức khỏe của tôi|dị ứng của tôi/.test(lower)) topics.push('Hồ sơ sức khỏe cá nhân');
+  if (/thành phần|nguyên liệu|calo|protein|carb|fat|dinh dưỡng/.test(lower)) topics.push('Dinh dưỡng & Thành phần món');
   if (/chào|hi|hello|ơi|shop ơi/.test(lower)) topics.push('Chào hỏi / Xã giao');
   if (topics.length === 0) topics.push('Tư vấn món ăn');
   return topics;
@@ -129,25 +134,34 @@ export const recommendFood = async (req, res) => {
       return res.status(400).json({ message: 'Cau hoi vuot qua do dai cho phep (toi da 1000 ky tu).' });
     }
 
-    // Lấy tất cả món ăn trong menu để AI nhận biết được cả món đang có sẵn và món tạm hết
+    // 1. TẢI DỮ LIỆU THỰC ĐƠN TOÀN DIỆN (Đầy đủ dinh dưỡng, nguyên liệu, trạng thái, đánh giá, lượt bán)
     const allFoods = await Food.find({})
-      .select('name price healthTags suitableFor warningFor nutrition.calories isAvailable')
+      .populate('category', 'name')
+      .select('name price discountPrice healthTags suitableFor warningFor nutrition ingredients isAvailable stock ratingAverage ratingCount soldCount category')
       .lean();
 
     const availableFoods = allFoods.filter((f) => f.isAvailable !== false);
     const unavailableFoods = allFoods.filter((f) => f.isAvailable === false);
 
-    // Context món có sẵn (đang bán)
-    const availableFoodContext = availableFoods.map(f =>
-      `- ${f.name} (${(f.price || 0).toLocaleString()}đ, ~${f.nutrition?.calories || '?'} kcal)` +
-      (f.healthTags?.length   ? ` [${f.healthTags.join(', ')}]` : '') +
-      (f.suitableFor?.length  ? ` ✓${f.suitableFor.join(', ')}` : '') +
-      (f.warningFor?.length   ? ` ✗${f.warningFor.join(', ')}` : '')
-    ).join('\n');
+    // Format thực đơn đang phục vụ
+    const availableFoodContext = availableFoods.map((f) => {
+      const nut = f.nutrition || {};
+      const nutStr = `~${nut.calories || '?'} kcal (Đạm: ${nut.protein ?? '?'}g, Carb: ${nut.carbs ?? '?'}g, Béo: ${nut.fat ?? '?'}g)`;
+      const ingrStr = f.ingredients?.length ? `Nguyên liệu: ${f.ingredients.join(', ')}` : '';
+      const tagsStr = f.healthTags?.length ? `Thẻ: [${f.healthTags.join(', ')}]` : '';
+      const suitStr = f.suitableFor?.length ? `Phù hợp: [${f.suitableFor.join(', ')}]` : '';
+      const warnStr = f.warningFor?.length ? `Cảnh báo: [${f.warningFor.join(', ')}]` : '';
+      const catStr = f.category?.name ? `Danh mục: ${f.category.name}` : '';
+      const rateStr = f.ratingAverage > 0 ? `★ ${f.ratingAverage.toFixed(1)}/5 (${f.ratingCount || 0} đánh giá)` : '';
+      const soldStr = f.soldCount > 0 ? `Đã bán: ${f.soldCount}` : '';
 
-    // Context món tạm hết (không khả dụng)
+      return `- ${f.name} | Giá: ${(f.price || 0).toLocaleString()}đ | ${nutStr}` +
+        `\n  ${[catStr, ingrStr, tagsStr, suitStr, warnStr, rateStr, soldStr].filter(Boolean).join(' | ')}`;
+    }).join('\n');
+
+    // Format danh sách món tạm hết
     const unavailableFoodContext = unavailableFoods.length > 0
-      ? unavailableFoods.map(f => `- ${f.name} [TẠM HẾT]`).join('\n')
+      ? unavailableFoods.map((f) => `- ${f.name} [TẠM HẾT / HẾT HÀNG]`).join('\n')
       : '(Hiện tại không có món nào tạm hết)';
 
     // Nhận diện nhanh nếu khách hỏi đích danh món đang tạm hết
@@ -162,12 +176,13 @@ export const recommendFood = async (req, res) => {
 
     let unavailableNotice = '';
     if (mentionedUnavailableFoods.length > 0) {
-      const namesStr = mentionedUnavailableFoods.map(f => `"${f.name}"`).join(', ');
-      unavailableNotice = `\n⚠️ CẢNH BÁO QUAN TRỌNG: Khách hàng đang hỏi về món ${namesStr} - món này hiện ĐANG TẠM HẾT trên hệ thống! BẮT BUỘC thông báo rõ ràng cho khách rằng món này đã tạm hết/hết hàng. Tuyệt đối KHÔNG được nói món này còn hàng và KHÔNG nhầm lẫn với bất kỳ món nào khác (ví dụ: không nhầm lẫn giữa "Cơm khoai lang gà cải xanh" và "Gà ta khoai lang cải xanh"). Có thể gợi ý món thay thế tương tự đang có sẵn.`;
+      const namesStr = mentionedUnavailableFoods.map((f) => `"${f.name}"`).join(', ');
+      unavailableNotice = `\n⚠️ CẢNH BÁO: Khách hàng đang hỏi về món ${namesStr} - món này ĐANG TẠM HẾT trên hệ thống! BẮT BUỘC thông báo rõ ràng là tạm hết, KHÔNG được nói còn hàng và KHÔNG nhầm lẫn với bất kỳ món nào khác. Có thể gợi ý món thay thế tương tự đang có sẵn.`;
     }
 
-    // Hồ sơ sức khỏe người dùng chi tiết (cân nặng, chiều cao, BMI, bệnh lý, dị ứng...)
-    const hp = user.healthProfile || {};
+    // 2. TẢI DỮ LIỆU NGƯỜI DÙNG & HỒ SƠ SỨC KHỎE CHI TIẾT
+    const fullUser = await User.findById(user._id).populate('favoriteFoods', 'name price').lean();
+    const hp = fullUser?.healthProfile || {};
     const healthParts = [];
     if (hp.age) healthParts.push(`Tuổi: ${hp.age}`);
     if (hp.gender) healthParts.push(`Giới tính: ${hp.gender === 'male' || hp.gender === 'Nam' ? 'Nam' : hp.gender === 'female' || hp.gender === 'Nữ' ? 'Nữ' : hp.gender}`);
@@ -183,9 +198,9 @@ export const recommendFood = async (req, res) => {
         let bmiDesc = 'Bình thường';
         if (bmi < 18.5) bmiDesc = 'Thiếu cân';
         else if (bmi <= 22.9) bmiDesc = 'Lý tưởng (chuẩn WHO Châu Á)';
-        else if (bmi <= 24.9) bmiDesc = 'Thừa cân';
+        else if (bmi <= 24.9) bmiDesc = 'Thừa cân / Tiền béo phì';
         else bmiDesc = 'Béo phì';
-        healthParts.push(`BMI: ${bmi} (${bmiDesc})`);
+        healthParts.push(`Chỉ số BMI: ${bmi} (${bmiDesc})`);
       }
     }
 
@@ -201,7 +216,7 @@ export const recommendFood = async (req, res) => {
     if (hp.dietType) healthParts.push(`Chế độ ăn: ${hp.dietType}`);
     if (hp.activityLevel) {
       const actLabels = {
-        sedentary: 'Ít vận động (văn phòng)',
+        sedentary: 'Ít vận động (dân văn phòng)',
         light: 'Vận động nhẹ (1-3 ngày/tuần)',
         moderate: 'Vận động vừa (3-5 ngày/tuần)',
         very_active: 'Vận động nhiều (6-7 ngày/tuần)',
@@ -209,14 +224,48 @@ export const recommendFood = async (req, res) => {
       };
       healthParts.push(`Mức độ vận động: ${actLabels[hp.activityLevel] || hp.activityLevel}`);
     }
-    if (hp.allergies?.length) healthParts.push(`Dị ứng thực phẩm: ${Array.isArray(hp.allergies) ? hp.allergies.join(', ') : hp.allergies}`);
+    if (hp.allergies?.length) healthParts.push(`Tiền sử dị ứng: ${Array.isArray(hp.allergies) ? hp.allergies.join(', ') : hp.allergies}`);
     if (hp.conditions?.length) healthParts.push(`Bệnh lý nền: ${Array.isArray(hp.conditions) ? hp.conditions.join(', ') : hp.conditions}`);
 
     const healthSummary = healthParts.length > 0
       ? healthParts.join(' | ')
       : 'Khách hàng chưa cập nhật hồ sơ sức khỏe';
 
-    // Lấy tối đa 4 lượt chat gần nhất để AI hiểu ngữ cảnh trò chuyện liên tục
+    // Thông tin tài khoản & thành viên
+    const accountInfo = [
+      `Hạng thành viên: ${fullUser?.tier || 'Thành viên'}`,
+      `Tổng chi tiêu: ${(fullUser?.totalSpent || 0).toLocaleString('vi-VN')}đ`,
+      fullUser?.favoriteFoods?.length ? `Món yêu thích: ${fullUser.favoriteFoods.map((f) => f.name).join(', ')}` : 'Chưa lưu món yêu thích',
+    ].join(' | ');
+
+    // 3. TẢI ĐƠN HÀNG GẦN ĐÂY CỦA KHÁCH HÀNG (Để AI trả lời chính xác khi khách hỏi đơn)
+    const recentOrders = await Order.find({ user: user._id })
+      .sort({ createdAt: -1 })
+      .limit(3)
+      .lean();
+
+    const statusMap = {
+      pending: 'Chờ xác nhận',
+      confirmed: 'Đã xác nhận',
+      preparing: 'Đang chuẩn bị món',
+      shipping: 'Đang giao hàng',
+      completed: 'Hoàn thành',
+      cancelled: 'Đã hủy',
+    };
+
+    const recentOrdersContext = recentOrders.length > 0
+      ? recentOrders.map((ord) => {
+        const orderCode = ord._id.toString().slice(-6).toUpperCase();
+        const dateStr = ord.createdAt ? new Date(ord.createdAt).toLocaleString('vi-VN') : '';
+        const itemsStr = ord.items?.map((it) => `${it.name} (x${it.quantity})`).join(', ') || '';
+        const totalStr = `${(ord.totalAmount || 0).toLocaleString('vi-VN')}đ`;
+        const payStr = `${ord.paymentMethod} (${ord.paymentStatus === 'paid' ? 'Đã thanh toán' : 'Chưa thanh toán'})`;
+        const stStr = statusMap[ord.orderStatus] || ord.orderStatus;
+        return `• Mã #${orderCode} | Trạng thái: [${stStr}] | Đặt lúc: ${dateStr} | Món: ${itemsStr} | Tổng tiền: ${totalStr} | Thanh toán: ${payStr}`;
+      }).join('\n')
+      : 'Khách hàng chưa có đơn hàng nào gần đây.';
+
+    // 4. LẤY LỊCH SỬ CHAT GẦN NHẤT
     const recentChats = await AIChat.find({ user: user._id })
       .sort({ createdAt: -1 })
       .limit(4)
@@ -228,63 +277,81 @@ export const recommendFood = async (req, res) => {
       assistant: c.response,
     }));
 
-    const systemPrompt = `Bạn là chuyên viên dinh dưỡng và chăm sóc khách hàng thông minh của FoodCare (cửa hàng đồ ăn dinh dưỡng & cá nhân hoá sức khỏe).
-Khách hàng: ${user.name || 'Quý khách'}
-HỒ SƠ THỂ TRẠNG & SỨC KHỎE CỦA KHÁCH HÀNG:
-${healthSummary}${unavailableNotice}
+    // 5. SYSTEM PROMPT TOÀN DIỆN CỦA HỆ THỐNG FOODCARE
+    const systemPrompt = `Bạn là Trợ lý AI Chuyên Gia Dinh Dưỡng & Vận Hành của FoodCare (hệ thống nhà hàng ẩm thực dinh dưỡng & cá nhân hóa sức khỏe hàng đầu).
+Bạn nắm toàn bộ cơ sở dữ liệu và chính sách hoạt động của hệ thống FoodCare.
 
-THỰC ĐƠN ĐANG CÓ SẴN (CÒN HÀNG - CÓ THỂ ĐẶT MÓN):
+════════════════════════════════════════════════════════════
+THÔNG TIN KHÁCH HÀNG HIỆN TẠI:
+• Tên khách hàng: ${fullUser?.name || 'Quý khách'} (Email: ${fullUser?.email || ''})
+• Tài khoản & Cấp bậc: ${accountInfo}
+• Hồ sơ thể trạng & sức khỏe: ${healthSummary}
+• Đơn hàng gần nhất:
+${recentOrdersContext}${unavailableNotice}
+
+════════════════════════════════════════════════════════════
+THỰC ĐƠN ĐANG PHỤC VỤ (CÒN HÀNG - CÓ THỂ ĐẶT MÓN):
 ${availableFoodContext}
 
-DANH SÁCH MÓN ĐANG TẠM HẾT (HẾT HÀNG - KHÔNG THỂ ĐẶT MÓN):
+════════════════════════════════════════════════════════════
+DANH SÁCH MÓN TẠM HẾT (HẾT HÀNG - KHÔNG THỂ ĐẶT MÓN):
 ${unavailableFoodContext}
 
-HƯỚNG DẪN XỬ LÝ THEO TỪNG LOẠI CÂU HỎI (RẤT QUAN TRỌNG):
-1. NẾU KHÁCH HỎI VỀ THỂ TRẠNG / CÂN NẶNG / CHIỀU CAO / SỨC KHỎE CỦA CHÍNH HỌ (ví dụ: "mình bao nhiêu kg?", "tôi nặng bao nhiêu?", "chiều cao của mình", "thể trạng của tôi thế nào", "chỉ số BMI của tôi", "tôi có bị dị ứng gì không"):
-   - Hãy trả lời chính xác, chu đáo dựa trên "HỒ SƠ THỂ TRẠNG & SỨC KHỎE CỦA KHÁCH HÀNG" ở trên.
-   - Nêu rõ số cân nặng (${hp.weight ? hp.weight + ' kg' : 'chưa cập nhật'}), chiều cao (${hp.height ? hp.height + ' cm' : 'chưa cập nhật'}), chỉ số BMI, mục tiêu và tiền sử dị ứng đã lưu.
+════════════════════════════════════════════════════════════
+THÔNG TIN CỬA HÀNG & CHÍNH SÁCH DỊCH VỤ FOODCARE:
+• Giờ mở cửa: 07:00 - 22:00 mỗi ngày từ Thứ Hai đến Chủ Nhật.
+• Tốc độ giao hàng: Giao hàng hỏa tốc trong 25 - 45 phút, đóng gói bảo ôn giữ nhiệt độ tối ưu.
+• Phí giao hàng: Miễn phí vận chuyển (Freeship) cho đơn hàng từ 200.000đ hoặc khách hàng đạt hạng Vàng / Kim Cương.
+• Phương thức thanh toán: Tiền mặt khi nhận hàng (COD), Ví điện tử MoMo (quét mã QR tức thì), Chuyển khoản ngân hàng.
+• Chính sách thành viên:
+  - Hạng Thành viên: Tích lũy chi tiêu trên mỗi đơn.
+  - Hạng Vàng (Tổng chi tiêu ≥ 1.000.000đ): Giảm giá 5% mọi đơn hàng, ưu tiên chuẩn bị món.
+  - Hạng Kim Cương (Tổng chi tiêu ≥ 3.000.000đ): Giảm giá 10% trọn đời, quà tặng sinh nhật đặc quyền.
+• Cam kết chất lượng: 100% nguyên liệu tươi sạch chuẩn VietGAP, công thức được thẩm định bởi chuyên gia dinh dưỡng, hệ thống cảnh báo dị ứng tự động bảo vệ thực khách.
+
+════════════════════════════════════════════════════════════
+HƯỚNG DẪN XỬ LÝ THEO TỪNG NHÓM CÂU HỎI (QUY CHUẨN ĐẶC BIỆT):
+
+1. KHÁCH HỎI VỀ BẢN THÂN / THỂ TRẠNG / CÂN NẶNG / CHIỀU CAO / BMI / DỊ ỨNG:
+   - Trả lời chính xác các số liệu đã lưu: Cân nặng (${hp.weight ? hp.weight + ' kg' : 'chưa cập nhật'}), Chiều cao (${hp.height ? hp.height + ' cm' : 'chưa cập nhật'}), chỉ số BMI kèm phân loại (lý tưởng, thừa cân...), mục tiêu sức khỏe và danh sách dị ứng.
    - Nếu khách chưa cập nhật trường nào, nhẹ nhàng hướng dẫn khách vào trang "Hồ sơ cá nhân" (/profile) để cập nhật.
-   - Dòng cuối cùng bắt buộc: RECOMMENDATIONS: []
+   - Dòng cuối cùng: RECOMMENDATIONS: []
 
-2. NẾU KHÁCH CHÀO HỎI / XÃ GIAO / CẢM ƠN (ví dụ: "hi", "chào shop", "hello", "shop ơi", "bạn là ai", "cảm ơn", "tạm biệt"):
-   - Chào lại khách hàng một cách thân thiện, nhiệt tình và lịch sự.
-   - Giới thiệu bạn là trợ lý dinh dưỡng FoodCare, sẵn sàng tư vấn món ăn phù hợp với khẩu vị, chế độ ăn kiêng (giảm cân, tập gym, ăn chay, eat clean...) hoặc hỗ trợ bệnh lý (tiểu đường, huyết áp...).
-   - Hỏi khách hôm nay cần tư vấn món ăn hay hỗ trợ điều gì.
-   - TUYỆT ĐỐI KHÔNG tự động liệt kê danh sách món ăn khi khách chỉ mới chào hỏi hoặc chưa hỏi món!
-   - Dòng cuối cùng bắt buộc: RECOMMENDATIONS: []
+2. KHÁCH HỎI VỀ ĐƠN HÀNG CỦA HỌ (ví dụ: "đơn hàng của tôi thế nào", "tôi vừa đặt món gì", "đơn gần nhất đang giao chưa", "tổng chi tiêu của tôi"):
+   - Dựa vào phần "Đơn hàng gần nhất" ở trên để báo chính xác: Mã đơn (#...), trạng thái hiện tại (Đang chuẩn bị / Đang giao...), các món đã đặt, tổng tiền và trạng thái thanh toán.
+   - Dòng cuối cùng: RECOMMENDATIONS: []
 
-3. NẾU KHÁCH HỎI KIỂM TRA MÓN ĂN CÒN HAY HẾT (ví dụ: "cơm khoai lang gà cải xanh còn không?", "món X còn không?"):
-   - ĐỐI CHIẾU CHÍNH XÁC TÊN MÓN KHÁCH HỎI:
-     + Chú ý phân biệt chính xác tên món, TRÁNH nhầm lẫn giữa các món có tên gần giống nhau (Ví dụ: "Cơm khoai lang gà cải xanh" là món TẠM HẾT, hoàn toàn khác biệt với món "Gà ta khoai lang cải xanh" đang CÒN HÀNG).
-   - Nếu món khách hỏi nằm trong "DANH SÁCH MÓN ĐANG TẠM HẾT":
-     + THÔNG BÁO RÕ RÀNG: Món **[Tên món khách hỏi]** hiện tại đã TẠM HẾT (chưa thể đặt hàng lúc này).
-     + TUYỆT ĐỐI KHÔNG nói món đó còn hàng, và TUYỆT ĐỐI KHÔNG lấy thông tin món khác có tên gần giống để nói là còn hàng!
-     + Lịch sự gợi ý khách 1-2 món tương tự ĐANG CÓ SẴN trên thực đơn để thay thế (nêu rõ món gợi ý này đang có sẵn).
-     + Ở dòng RECOMMENDATIONS, chỉ đưa món thay thế đang có sẵn (nếu có gợi ý), TUYỆT ĐỐI KHÔNG đưa món tạm hết vào.
-   - Nếu món khách hỏi nằm trong "THỰC ĐƠN ĐANG CÓ SẴN":
-     + Báo cho khách biết món **[Tên món]** hiện đang có sẵn trên thực đơn, kèm giá và calo để khách đặt món.
-     + Dòng cuối cùng: RECOMMENDATIONS: ["Tên món"]
-   - Nếu món không có trong cả 2 danh sách:
-     + Thông báo cửa hàng hiện chưa có món này trên thực đơn, gợi ý 1-2 món có sẵn phù hợp.
-     + Dòng cuối cùng: RECOMMENDATIONS: [...]
+3. KHÁCH HỎI VỀ NGUYÊN LIỆU / THÀNH PHẦN / DINH DƯỠNG CỤ THỂ CỦA MÓN ĂN:
+   - Đọc chính xác từ danh sách THỰC ĐƠN: Nêu rõ lượng calo, protein, carb, fat và danh sách nguyên liệu của món đó.
+   - Báo rõ món đó có phù hợp với người bị dị ứng hay ăn kiêng không.
+   - Dòng cuối cùng: RECOMMENDATIONS: ["Tên món"]
 
-4. NẾU KHÁCH HỎI VỀ DỊCH VỤ / CÂU HỎI CHUNG (ví dụ: giao hàng, giờ mở cửa, cách thức đặt món, thanh toán):
-   - Trả lời ngắn gọn, lịch sự, đúng trọng tâm và hướng dẫn khách đặt món trên website.
-   - Dòng cuối cùng bắt buộc: RECOMMENDATIONS: []
+4. KHÁCH HỎI MÓN NÀO BÁN CHẠY NHẤT / ĐƯỢC ĐÁNH GIÁ CAO NHẤT / MÓN CHAY / MÓN THEO DANH MỤC:
+   - Dựa vào điểm đánh giá (★), số lượt bán (Đã bán) và danh mục trong thực đơn để gợi ý 2-3 món tốt nhất.
+   - Dòng cuối cùng: RECOMMENDATIONS: ["Tên món 1", "Tên món 2"]
 
-5. NẾU KHÁCH CẦN TƯ VẤN MÓN ĂN / DINH DƯỠNG / BỆNH LÝ / BỮA ĂN:
-   - Trả lời đúng trọng tâm câu hỏi của khách, kết hợp với hồ sơ sức khỏe nếu có.
-   - CHỈ GỢI Ý các món trong "THỰC ĐƠN ĐANG CÓ SẴN" (tuyệt đối KHÔNG gợi ý món đang TẠM HẾT).
-   - In đậm tên món ăn: **Tên món**, kèm lý do ngắn gọn vì sao phù hợp (calo, đạm, ít tinh bột/đường, tốt cho sức khỏe...).
-   - Nếu khách hỏi về bệnh lý hoặc ăn kiêng đặc biệt, thêm 1 dòng: "⚠️ Tham khảo bác sĩ trước khi thay đổi chế độ ăn."
-   - Dòng CUỐI CÙNG bắt buộc phải là:
-     RECOMMENDATIONS: ["Tên món 1", "Tên món 2"]
+5. KHÁCH HỎI MÓN CÒN HAY HẾT:
+   - Đối chiếu chính xác: Nếu món thuộc "DANH SÁCH MÓN TẠM HẾT", báo ngay là đã TẠM HẾT và gợi ý món tương tự đang có sẵn. Tuyệt đối KHÔNG nhầm lẫn tên món (ví dụ: "Cơm khoai lang gà cải xanh" là TẠM HẾT, khác với "Gà ta khoai lang cải xanh").
+   - Nếu có sẵn, báo giá và calo để khách đặt.
 
-QUY TẮC:
-• Trả lời tự nhiên, súc tích, bằng tiếng Việt chuẩn mực, tối đa 150-200 từ.
-• Đọc thật kỹ tên món khách hỏi để đối chiếu chính xác với cả 2 danh sách ĐANG CÓ SẴN và ĐANG TẠM HẾT.
-• KHÔNG bịa ra món ngoài danh sách THỰC ĐƠN.
-• Mảng RECOMMENDATIONS: [...] CHỈ ĐƯỢC CHỨA các món ĐANG CÓ SẴN, tuyệt đối KHÔNG chứa món TẠM HẾT.`;
+6. KHÁCH CẦN TƯ VẤN THỰC ĐƠN / DINH DƯỠNG / BỆNH LÝ (tiểu đường, giảm cân, gym, huyết áp...):
+   - ĐỐI CHIẾU VỚI TIỀN SỬ DỊ ỨNG CỦA KHÁCH: TUYỆT ĐỐI KHÔNG gợi ý món có chứa nguyên liệu khách bị dị ứng!
+   - Tư vấn khoa học, in đậm **Tên món**, giải thích lý do vì sao phù hợp.
+   - Thêm câu khuyến cáo: "⚠️ Tham khảo ý kiến chuyên gia/bác sĩ trước khi thay đổi chế độ dinh dưỡng đặc biệt."
+   - Dòng cuối cùng: RECOMMENDATIONS: ["Tên món 1", "Tên món 2"]
+
+7. KHÁCH HỎI VỀ CỬA HÀNG / GIỜ MỞ CỬA / PHÍ SHIP / THANH TOÁN / ƯU ĐÃI THÀNH VIÊN:
+   - Trả lời đúng theo THÔNG TIN CỬA HÀNG & CHÍNH SÁCH DỊCH VỤ ở trên.
+   - Dòng cuối cùng: RECOMMENDATIONS: []
+
+8. KHÁCH CHÀO HỎI / XÃ GIAO:
+   - Chào nhiệt tình, lịch sự, giới thiệu vai trò và hỏi khách cần hỗ trợ gì. KHÔNG tự động liệt kê danh sách món khi chưa được hỏi.
+   - Dòng cuối cùng: RECOMMENDATIONS: []
+
+QUY TẮC BẮT BUỘC:
+• Trả lời súc tích, văn phong chuyên nghiệp, ấm áp, lịch thiệp bằng tiếng Việt chuẩn mực (tối đa 150-200 từ).
+• In đậm tên món: **Tên món**.
+• Mảng RECOMMENDATIONS ở dòng cuối cùng chỉ chứa tên chính xác của món CÒN HÀNG, không bịa tên món.`;
 
     let aiResponseText;
     try {
