@@ -1,4 +1,6 @@
+import mongoose from 'mongoose';
 import Food from '../models/Food.js';
+import Category from '../models/Category.js';
 import Review from '../models/Review.js';
 import Order from '../models/Order.js';
 import Notification from '../models/Notification.js';
@@ -16,9 +18,31 @@ export const getFoods = async (req, res) => {
     const keyword = req.query.keyword
       ? { name: { $regex: req.query.keyword, $options: 'i' } }
       : {};
-    const category = req.query.category ? { category: req.query.category } : {};
-    const filters = { ...keyword, ...category };
 
+    let categoryFilter = {};
+    if (req.query.category) {
+      const rawCategory = String(req.query.category).trim();
+      if (mongoose.Types.ObjectId.isValid(rawCategory) && /^[0-9a-fA-F]{24}$/.test(rawCategory)) {
+        categoryFilter = { category: rawCategory };
+      } else {
+        const slugPattern = rawCategory.toLowerCase().replace(/\s+/g, '-');
+        const matchedCategory = await Category.findOne({
+          $or: [
+            { slug: rawCategory },
+            { slug: slugPattern },
+            { name: { $regex: `^${rawCategory.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' } },
+          ],
+        }).select('_id');
+
+        if (matchedCategory) {
+          categoryFilter = { category: matchedCategory._id };
+        } else {
+          return res.json([]);
+        }
+      }
+    }
+
+    const filters = { ...keyword, ...categoryFilter };
     const foods = await Food.find(filters).populate('category', 'name slug');
 
     // Cache 60 giây phía client, 30 giây stale-while-revalidate
