@@ -58,6 +58,9 @@ export const getFoods = async (req, res) => {
 // @access  Public
 export const getFoodById = async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(404).json({ message: 'Food not found' });
+    }
     const food = await Food.findById(req.params.id).populate('category', 'name slug');
 
     if (food) {
@@ -92,6 +95,9 @@ export const getFoodBySlug = async (req, res) => {
 // @access  Private
 export const createFoodReview = async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(404).json({ message: 'Food not found' });
+    }
     const { rating, comment, mediaUrls = [] } = req.body;
     const food = await Food.findById(req.params.id);
 
@@ -336,7 +342,7 @@ export const createFood = async (req, res) => {
       price: numericPrice,
       description: description || 'Dang cap nhat mo ta mon an.',
       category,
-      images: images?.length ? images : ['https://via.placeholder.com/500'],
+      images: images?.length ? images : ['https://placehold.co/500x500/f97316/ffffff?text=FoodCare'],
       ingredients: ingredients || [],
       suitableFor: suitableFor || [],
       healthTags: healthTags || [],

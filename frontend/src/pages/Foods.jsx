@@ -8,7 +8,7 @@ import { useFavorite } from '../context/FavoriteContext';
 
 const Foods = () => {
   const { user } = useAuth();
-  const { addFavorite, isFavorited } = useFavorite();
+  const { toggleFavorite, isFavorited } = useFavorite();
   const { addToCart } = useCart();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -328,7 +328,7 @@ const Foods = () => {
                           <button
                             onClick={(e) => {
                               e.preventDefault();
-                              addFavorite(food);
+                              toggleFavorite(food);
                             }}
                             className={`w-10 h-10 rounded-full flex items-center justify-center transition-all border ${
                               isFavorited(food._id)

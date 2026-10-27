@@ -28,7 +28,7 @@ const FoodDetail = () => {
   const [previewMediaModal, setPreviewMediaModal] = useState(null);
   const { addToCart } = useCart();
   const { user } = useAuth();
-  const { addFavorite, isFavorited } = useFavorite();
+  const { toggleFavorite, isFavorited } = useFavorite();
 
   const healthProfile = user?.healthProfile;
   const allergyCheck = useMemo(() => {
@@ -400,7 +400,7 @@ const FoodDetail = () => {
                 <ShoppingCart size={20} /> {food.isAvailable ? 'Thêm vào giỏ' : 'Tạm hết'}
               </button>
               <button
-                onClick={() => food.isAvailable && addFavorite(food)}
+                onClick={() => food.isAvailable && toggleFavorite(food)}
                 disabled={!food.isAvailable}
                 className={`py-3.5 px-5 rounded-xl font-bold border-2 flex items-center justify-center gap-2 transition-all ${
                   !food.isAvailable

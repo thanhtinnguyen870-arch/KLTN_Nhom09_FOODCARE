@@ -22,8 +22,8 @@ const contactInfos = [
   {
     icon: <Mail size={22} />,
     label: 'Email',
-    value: 'contact@foodcare.vn',
-    href: 'mailto:contact@foodcare.vn',
+    value: 'thanhtinnguyen870@gmail.com',
+    href: 'mailto:thanhtinnguyen870@gmail.com',
     color: 'bg-green-100 text-green-600',
   },
   {

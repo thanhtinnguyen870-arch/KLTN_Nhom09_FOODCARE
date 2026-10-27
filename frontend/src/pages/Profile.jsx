@@ -20,6 +20,7 @@ import {
   RotateCcw,
   ShoppingCart,
   ShieldAlert,
+  QrCode,
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { useAuth } from '../context/AuthContext';
@@ -27,6 +28,7 @@ import { useCart } from '../context/CartContext';
 import axiosClient from '../api/axiosClient';
 import { toast } from 'react-toastify';
 import NutritionTargetCard from '../components/NutritionTargetCard';
+import VietQrModal from '../components/VietQrModal';
 import { ACTIVITY_LEVELS, GOALS, COMMON_ALLERGIES } from '../utils/nutritionCalculator';
 
 const orderSteps = [
@@ -76,10 +78,17 @@ const Profile = () => {
   const [uploading, setUploading] = useState(false);
   const [orders, setOrders] = useState([]);
   const [ordersLoading, setOrdersLoading] = useState(true);
+  const [selectedBankOrderForQr, setSelectedBankOrderForQr] = useState(null);
+  const [isBankQrModalOpen, setIsBankQrModalOpen] = useState(false);
   const [historyFilter, setHistoryFilter] = useState('all');
   const [historySearch, setHistorySearch] = useState('');
   const [trackingSearch, setTrackingSearch] = useState('');
   const setMessage = (msg) => toast.info(msg);
+
+  const handleOpenBankQr = (order) => {
+    setSelectedBankOrderForQr(order);
+    setIsBankQrModalOpen(true);
+  };
   const [healthData, setHealthData] = useState({
     age: user?.healthProfile?.age || '',
     gender: user?.healthProfile?.gender || 'male',
@@ -828,6 +837,7 @@ const Profile = () => {
                 emptyTitle={trackingSearch ? 'Không tìm thấy đơn hàng đang xử lý' : 'Bạn chưa có đơn hàng đang xử lý'}
                 emptyDescription={trackingSearch ? 'Thử tìm bằng tên món ăn hoặc 8 ký tự cuối mã đơn.' : 'Các đơn chờ xác nhận, đang chuẩn bị hoặc đang giao sẽ xuất hiện tại đây.'}
                 onCancelOrder={handleCancelOrder}
+                onViewBankQr={handleOpenBankQr}
               />
             </section>
           )}
@@ -915,11 +925,23 @@ const Profile = () => {
                 emptyDescription={historySearch ? 'Thử tìm bằng tên món ăn hoặc 8 ký tự cuối mã đơn.' : 'Khi đơn hoàn thành hoặc bị hủy, hệ thống sẽ lưu lại tại đây.'}
                 onCancelOrder={handleCancelOrder}
                 onReorder={handleReorder}
+                onViewBankQr={handleOpenBankQr}
               />
             </section>
           )}
         </main>
       </div>
+
+      {/* Modal hiển thị mã QR VietQR khi khách muốn xem lại mã */}
+      <VietQrModal
+        isOpen={isBankQrModalOpen}
+        onClose={() => setIsBankQrModalOpen(false)}
+        order={selectedBankOrderForQr}
+        onComplete={() => {
+          toast.success('FoodCare đã ghi nhận. Nhân viên sẽ kiểm tra thanh toán ngay!');
+          setIsBankQrModalOpen(false);
+        }}
+      />
     </div>
   );
 };
@@ -949,7 +971,7 @@ const ProfileInfo = ({ label, value, tone = 'gray' }) => {
   );
 };
 
-const OrdersSection = ({ title, loading, orders, emptyTitle, emptyDescription, onCancelOrder, onReorder }) => (
+const OrdersSection = ({ title, loading, orders, emptyTitle, emptyDescription, onCancelOrder, onReorder, onViewBankQr }) => (
   <section className="rounded-3xl border border-gray-100 bg-white p-6 shadow-3d">
     {title && <h3 className="mb-5 text-2xl font-bold text-dark">{title}</h3>}
     {loading ? (
@@ -966,14 +988,20 @@ const OrdersSection = ({ title, loading, orders, emptyTitle, emptyDescription, o
     ) : (
       <div className="space-y-5">
         {orders.map((order) => (
-          <OrderCard key={order._id} order={order} onCancelOrder={onCancelOrder} onReorder={onReorder} />
+          <OrderCard
+            key={order._id}
+            order={order}
+            onCancelOrder={onCancelOrder}
+            onReorder={onReorder}
+            onViewBankQr={onViewBankQr}
+          />
         ))}
       </div>
     )}
   </section>
 );
 
-const OrderCard = ({ order, onCancelOrder, onReorder }) => {
+const OrderCard = ({ order, onCancelOrder, onReorder, onViewBankQr }) => {
   const currentStepIndex = Math.max(0, orderSteps.findIndex((step) => step.key === order.orderStatus));
   const isCancelled = order.orderStatus === 'cancelled';
   const isCompleted = order.orderStatus === 'completed';
@@ -991,6 +1019,18 @@ const OrderCard = ({ order, onCancelOrder, onReorder }) => {
         </div>
         <div className="flex flex-wrap items-center gap-2 md:justify-end">
           <StatusBadge status={order.orderStatus} />
+          {/* Nút xem lại mã QR nếu là đơn BANK chưa thanh toán */}
+          {order.paymentMethod === 'BANK' && order.paymentStatus === 'unpaid' && !isCancelled && (
+            <button
+              type="button"
+              onClick={() => onViewBankQr && onViewBankQr(order)}
+              className="flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-800 shadow-sm hover:bg-emerald-100 hover:border-emerald-400 transition-all active:scale-95"
+              title="Mở mã QR VietQR MB Bank có sẵn số tiền đơn hàng để quét thanh toán"
+            >
+              <QrCode size={13} className="text-emerald-700" />
+              Mã QR thanh toán
+            </button>
+          )}
           {order.orderStatus === 'pending' && (
             order.paymentStatus === 'paid' ? (
               <span className="rounded-full bg-amber-50 border border-amber-200 px-3 py-1 text-xs font-semibold text-amber-700" title="Đơn đã thanh toán online. Vui lòng liên hệ hotline để hỗ trợ hủy & hoàn tiền.">

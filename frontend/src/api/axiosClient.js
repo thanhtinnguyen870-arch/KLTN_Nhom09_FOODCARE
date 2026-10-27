@@ -5,7 +5,7 @@ const axiosClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 15000,
+  timeout: 35000,
 });
 
 axiosClient.interceptors.request.use((config) => {

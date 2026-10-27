@@ -5,6 +5,8 @@ import axiosClient from '../api/axiosClient';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { CheckCircle, ArrowLeft, MapPin, CreditCard } from 'lucide-react';
 import { toast } from 'react-toastify';
+import VietQrModal from '../components/VietQrModal';
+import { BANK_CONFIG } from '../constants/bankConfig';
 
 const daNangDistricts = [
   'Quận Hải Châu',
@@ -29,6 +31,8 @@ const Checkout = () => {
   const [paymentMethod, setPaymentMethod] = useState('COD');
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [bankOrderForQr, setBankOrderForQr] = useState(null);
+  const [isBankModalOpen, setIsBankModalOpen] = useState(false);
 
   const totalAmount = cartItems.reduce((acc, item) => acc + item.price * item.quantity, 0);
 
@@ -112,6 +116,12 @@ const Checkout = () => {
         return;
       }
 
+      if (paymentMethod === 'BANK') {
+        setBankOrderForQr(createdOrder);
+        setIsBankModalOpen(true);
+        return;
+      }
+
       setSuccess(true);
       clearCart();
     } catch (error) {
@@ -119,6 +129,19 @@ const Checkout = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleBankPaymentCompleted = () => {
+    clearCart();
+    setIsBankModalOpen(false);
+    toast.success('FoodCare đã ghi nhận đơn hàng! Nhân viên sẽ kiểm tra thanh toán và chuẩn bị món cho bạn ngay.');
+    navigate('/profile?tab=tracking');
+  };
+
+  const handleCloseBankModal = () => {
+    clearCart();
+    setIsBankModalOpen(false);
+    navigate('/profile?tab=tracking');
   };
 
   if (success) {
@@ -146,7 +169,7 @@ const Checkout = () => {
     );
   }
 
-  if (cartItems.length === 0) {
+  if (cartItems.length === 0 && !isBankModalOpen && !bankOrderForQr) {
     return (
       <div className="text-center py-20 flex flex-col items-center">
         <h2 className="text-2xl font-bold mb-4">Giỏ hàng trống</h2>
@@ -313,20 +336,43 @@ const Checkout = () => {
                   />
                   <span className="text-2xl">🏦</span>
                   <div className="flex flex-col">
-                    <span className="font-bold text-dark">Chuyển khoản Ngân hàng</span>
-                    <span className="text-sm text-gray-500">Chuyển khoản qua ứng dụng Mobile Banking</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-dark">Chuyển khoản Ngân hàng (VietQR)</span>
+                      <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-200">
+                        MB Bank
+                      </span>
+                    </div>
+                    <span className="text-sm text-gray-500">Quét mã QR qua app ngân hàng - tự động điền số tiền {finalAmount.toLocaleString('vi-VN')}đ</span>
                   </div>
                 </label>
 
                 {paymentMethod === 'BANK' && (
-                  <div className="p-4 bg-emerald-50/60 border border-emerald-100 rounded-xl ml-8 animate-fade-in">
-                    <p className="text-sm text-emerald-900 mb-2">Vui lòng chuyển khoản tới thông tin sau. Đơn hàng sẽ được xác nhận ngay khi chúng tôi nhận được thanh toán.</p>
-                    <div className="bg-white p-3 rounded-lg border border-emerald-100">
-                      <p><strong>Ngân hàng:</strong> Vietcombank (VCB)</p>
-                      <p><strong>Số tài khoản:</strong> 1234567890</p>
-                      <p><strong>Chủ tài khoản:</strong> FOODCARE COMPANY</p>
-                      <p><strong>Nội dung:</strong> FC {phone || 'SĐT_CUA_BAN'}</p>
+                  <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-2xl ml-4 sm:ml-8 animate-fade-in space-y-3">
+                    <div className="flex items-center justify-between border-b border-emerald-200/60 pb-2">
+                      <span className="text-xs font-bold uppercase tracking-wider text-emerald-800">Thông tin tài khoản nhận:</span>
+                      <span className="text-[11px] font-semibold text-emerald-700 bg-white px-2 py-0.5 rounded-md border border-emerald-200">Napas 24/7</span>
                     </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <span className="text-gray-500 block text-[11px]">Ngân hàng:</span>
+                        <strong className="text-gray-900">{BANK_CONFIG.bankName}</strong>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 block text-[11px]">Số tài khoản:</span>
+                        <strong className="font-mono text-emerald-800 text-sm">{BANK_CONFIG.accountNo}</strong>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 block text-[11px]">Chủ tài khoản:</span>
+                        <strong className="text-emerald-950 uppercase">{BANK_CONFIG.accountName}</strong>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 block text-[11px]">Số tiền cần thanh toán:</span>
+                        <strong className="text-primary text-sm">{finalAmount.toLocaleString('vi-VN')} đ</strong>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-emerald-800 bg-white/80 p-2.5 rounded-xl border border-emerald-100">
+                      💡 Khi bấm <strong>&ldquo;Đặt hàng &amp; Lấy mã VietQR&rdquo;</strong>, hệ thống sẽ mở mã QR thông minh có sẵn đúng số tiền đơn hàng để bạn quét thanh toán nhanh.
+                    </p>
                   </div>
                 )}
 
@@ -370,7 +416,13 @@ const Checkout = () => {
                   </svg>
                   Đang xử lý...
                 </>
-              ) : paymentMethod === 'MOMO' ? '💳 Thanh toán với MoMo' : '✅ Xác nhận Đặt Hàng'}
+              ) : paymentMethod === 'MOMO' ? (
+                '💳 Thanh toán với MoMo'
+              ) : paymentMethod === 'BANK' ? (
+                '🏦 Đặt hàng & Lấy mã VietQR Chuyển khoản'
+              ) : (
+                '✅ Xác nhận Đặt Hàng (COD)'
+              )}
             </button>
           </form>
         </div>
@@ -420,6 +472,14 @@ const Checkout = () => {
           </div>
         </div>
       </div>
+
+      {/* Modal VietQR hiển thị mã QR kèm đúng số tiền */}
+      <VietQrModal
+        isOpen={isBankModalOpen}
+        onClose={handleCloseBankModal}
+        order={bankOrderForQr}
+        onComplete={handleBankPaymentCompleted}
+      />
     </div>
   );
 };

@@ -244,10 +244,7 @@ const Register = () => {
       </div>
 
       {/* ── Page wrapper ── */}
-      <div
-        className="relative z-10 flex items-center justify-center px-4"
-        style={{ height: 'calc(100vh - 80px)', overflow: 'hidden' }}
-      >
+      <div className="relative z-10 flex items-center justify-center px-4 py-6 min-h-[calc(100vh-80px)] overflow-y-auto">
         {/* ── Glassmorphism card ── */}
         <div className="reg-card-anim w-full max-w-[420px]" style={{
           background: 'rgba(255,255,255,0.07)',

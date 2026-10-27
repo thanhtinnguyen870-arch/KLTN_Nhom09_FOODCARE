@@ -1,4 +1,4 @@
-import { createContext, useContext, useReducer, useEffect, useState } from 'react';
+import { createContext, useContext, useReducer, useEffect, useState, useRef } from 'react';
 import { toast } from 'react-toastify';
 import { useAuth } from './AuthContext';
 import { checkFoodHealthConflict } from '../utils/nutritionCalculator';
@@ -82,11 +82,13 @@ export const CartProvider = ({ children }) => {
     localStorage.setItem('cartItems', JSON.stringify(state.cartItems));
   }, [state.cartItems]);
 
-  // Xóa giỏ hàng khi user đăng xuất
+  // Chỉ xóa giỏ hàng khi user thực sự đăng xuất (từ đã đăng nhập thành null)
+  const prevUserRef = useRef(user);
   useEffect(() => {
-    if (!user) {
+    if (prevUserRef.current && !user) {
       dispatch({ type: 'CLEAR_CART' });
     }
+    prevUserRef.current = user;
   }, [user]);
 
   const addToCart = (item, bypassWarning = false) => {

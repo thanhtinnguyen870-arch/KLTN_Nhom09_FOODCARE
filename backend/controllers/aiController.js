@@ -40,63 +40,75 @@ const buildMessages = (systemPrompt, conversationHistory = [], message) => {
 };
 
 const generateAIResponse = async (systemPrompt, conversationHistory, message) => {
-  if (!process.env.GROQ_API_KEY) {
-    throw new Error('Chưa cấu hình GROQ_API_KEY trong file .env');
-  }
-
-  const groq = new OpenAI({
-    apiKey: process.env.GROQ_API_KEY,
-    baseURL: 'https://api.groq.com/openai/v1',
-    timeout: 20000,
-  });
-
-  const invalidModels = new Set(['groq/compound-mini', 'qwen/qwen3.6-27b']);
-  const configuredModel = process.env.GROQ_MODEL;
-  const primaryModel = (configuredModel && !invalidModels.has(configuredModel))
-    ? configuredModel
-    : 'qwen/qwen3.8-27b';
-  const backupModels = ['openai/gpt-oss-20b', 'openai/gpt-oss-120b', 'qwen/qwen3.8-27b'].filter((m) => m !== primaryModel);
-
   const messages = buildMessages(systemPrompt, conversationHistory, message);
 
-  try {
-    const completion = await groq.chat.completions.create({
-      model: primaryModel,
-      messages,
-      temperature: 0.3,
-      max_tokens: 500,
+  // 1. Ưu tiên Google Gemini (Tốc độ xử lý tiếng Việt vượt trội, hạn ngạch token lớn)
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      const gemini = new OpenAI({
+        apiKey: process.env.GEMINI_API_KEY,
+        baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+        timeout: 25000,
+      });
+      const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+      const completion = await gemini.chat.completions.create({
+        model,
+        messages,
+        temperature: 0.3,
+        max_tokens: 3000,
+      });
+
+      const content = completion.choices?.[0]?.message?.content;
+      if (content && content.trim()) {
+        return content.trim();
+      }
+      console.warn('Gemini trả về nội dung rỗng, chuẩn bị chuyển sang Groq fallback...');
+    } catch (geminiError) {
+      console.warn('Gemini gặp lỗi:', geminiError.message, '-> Đang chuyển sang Groq fallback...');
+    }
+  }
+
+  // 2. Dự phòng (Fallback) với Groq
+  if (process.env.GROQ_API_KEY) {
+    const groq = new OpenAI({
+      apiKey: process.env.GROQ_API_KEY,
+      baseURL: 'https://api.groq.com/openai/v1',
+      timeout: 25000,
     });
 
-    return completion.choices[0].message.content;
-  } catch (primaryError) {
-    console.warn(`Groq model ${primaryModel} gặp lỗi:`, primaryError.message);
+    const candidateModels = [process.env.GROQ_MODEL, 'qwen/qwen3.8-27b', 'allam-2-7b']
+      .filter(Boolean)
+      .filter((m, idx, arr) => arr.indexOf(m) === idx);
 
-    for (const backupModel of backupModels) {
+    for (const model of candidateModels) {
       try {
-        console.log(`Đang thử lại với Groq backup model (${backupModel})...`);
         const backupCompletion = await groq.chat.completions.create({
-          model: backupModel,
+          model,
           messages,
           temperature: 0.3,
-          max_tokens: 500,
+          max_tokens: 1500,
         });
-        return backupCompletion.choices[0].message.content;
+
+        const content = backupCompletion.choices?.[0]?.message?.content;
+        if (content && content.trim()) {
+          return content.trim();
+        }
       } catch (backupError) {
-        console.warn(`Groq backup model (${backupModel}) cũng gặp lỗi:`, backupError.message);
+        console.warn(`Groq backup model (${model}) gặp lỗi:`, backupError.message);
       }
     }
-
-    throw primaryError;
   }
+
+  throw new Error('Không thể kết nối đến cả dịch vụ Gemini lẫn Groq AI.');
 };
 
 const extractRecommendedFoodNames = (aiResponseText) => {
-  const recMatch = aiResponseText.match(/RECOMMENDATIONS:\s*(\[[\s\S]*?\]|.+)$/i);
+  const recMatch = aiResponseText.match(/(?:\*{0,2})RECOMMENDATIONS(?:\*{0,2})\s*:\s*(\[[\s\S]*?\]|.+)$/i);
   if (!recMatch?.[1]) {
     return { responseMessage: aiResponseText, recommendedFoodNames: [] };
   }
 
-  const rawRecommendations = recMatch[1].trim();
+  let rawRecommendations = recMatch[1].trim().replace(/^```(?:json)?|```$/g, '').trim();
   let recommendedFoodNames = [];
 
   if (rawRecommendations.startsWith('[')) {
@@ -111,12 +123,12 @@ const extractRecommendedFoodNames = (aiResponseText) => {
     recommendedFoodNames = rawRecommendations
       .replace(/^\[|\]$/g, '')
       .split(',')
-      .map((name) => name.trim().replace(/^["']|["']$/g, ''))
+      .map((name) => name.trim().replace(/^["'*]+|["'*]+$/g, ''))
       .filter(Boolean);
   }
 
   return {
-    responseMessage: aiResponseText.replace(/RECOMMENDATIONS:\s*(\[[\s\S]*?\]|.+)$/i, '').trim(),
+    responseMessage: aiResponseText.replace(/(?:\n|^)\s*(?:\*{0,2})RECOMMENDATIONS(?:\*{0,2})\s*:[\s\S]*$/i, '').trim(),
     recommendedFoodNames,
   };
 };
@@ -146,50 +158,65 @@ export const recommendFood = async (req, res) => {
     const availableFoods = allFoods.filter((f) => f.isAvailable !== false);
     const unavailableFoods = allFoods.filter((f) => f.isAvailable === false);
 
-    // Chọn lọc các món ăn liên quan nhất tới câu hỏi để tối ưu hóa tokens (< 1,200 tokens)
-    const selectRelevantFoods = (foods, query = '') => {
-      const q = query.toLowerCase().trim();
-      const isSimpleGreetingOrPersonal = /^(chào|hi|hello|ơi|alo|tôi|mình|bao nhiêu|kg|cân nặng|chiều cao|bmi|sức khỏe|dị ứng|đơn hàng|ship|mở cửa|thanh toán)/i.test(q)
-        && !/món|ăn|gợi ý|thực đơn|calo|dinh dưỡng|thành phần|protein|béo|chay|thịt|cá|bò|gà/i.test(q);
-
-      if (isSimpleGreetingOrPersonal) {
-        return foods.slice(0, 10);
+    // Gửi TOÀN BỘ menu cho AI tự lọc ngữ nghĩa — 58 món ≈ 2,500 tokens, nằm trong giới hạn
+    // Gemini 2.5 Flash (1M token context). Không còn regex brittle, AI tự hiểu ý định user.
+    //
+    // Format mỗi món: tên | danh mục | giá | calo, đạm, carb, fat | tags | thành phần chính |
+    //                  phù hợp với | cảnh báo | ★rating (lượt bán)
+    //
+    // Nhóm theo danh mục để AI nhận diện category nhanh hơn.
+    const groupByCategory = (foods) => {
+      const map = {};
+      for (const f of foods) {
+        const cat = f.category?.name || 'Khác';
+        if (!map[cat]) map[cat] = [];
+        map[cat].push(f);
       }
-
-      const words = q.split(/\s+/).filter((w) => w.length > 1);
-      const scored = foods.map((food) => {
-        let score = 0;
-        const fName = (food.name || '').toLowerCase();
-        const fCat = (food.category?.name || '').toLowerCase();
-        const fTags = (food.healthTags || []).map((t) => t.toLowerCase()).join(' ');
-        const fIngs = (food.ingredients || []).map((i) => i.toLowerCase()).join(' ');
-
-        if (fName.includes(q)) score += 10;
-        for (const w of words) {
-          if (fName.includes(w)) score += 3;
-          if (fCat.includes(w)) score += 2;
-          if (fTags.includes(w)) score += 2;
-          if (fIngs.includes(w)) score += 1;
-        }
-        score += (food.soldCount || 0) * 0.01;
-        return { food, score };
-      });
-
-      scored.sort((a, b) => b.score - a.score);
-      return scored.slice(0, 20).map((s) => s.food);
+      return map;
     };
 
-    const relevantFoods = selectRelevantFoods(availableFoods, message);
-
-    // Format thực đơn tinh gọn (siêu tối ưu tokens, an toàn tuyệt đối với rate limit Groq)
-    const availableFoodContext = relevantFoods.map((f) => {
+    const formatFoodLine = (f) => {
       const nut = f.nutrition || {};
-      const cal = nut.calories ? `${nut.calories}kcal` : '';
-      const p = nut.protein ? `${nut.protein}g đạm` : '';
-      const ingr = f.ingredients?.length ? `TP: ${f.ingredients.slice(0, 3).join(', ')}` : '';
-      const tags = f.healthTags?.length ? `[${f.healthTags.slice(0, 2).join(', ')}]` : '';
-      return `• ${f.name} (${Math.round((f.price || 0) / 1000)}k, ${cal}${p ? ', ' + p : ''}) ${tags} ${ingr}`.trim();
-    }).join('\n');
+      const priceStr = f.discountPrice && f.discountPrice < f.price
+        ? `${Math.round(f.discountPrice / 1000)}k (giảm từ ${Math.round(f.price / 1000)}k)`
+        : `${Math.round((f.price || 0) / 1000)}k`;
+      const nutStr = [
+        nut.calories ? `${nut.calories}cal` : '',
+        nut.protein  ? `đạm${nut.protein}g` : '',
+        nut.carbs    ? `carb${nut.carbs}g`  : '',
+        nut.fat      ? `fat${nut.fat}g`     : '',
+      ].filter(Boolean).join(' ');
+      const tags    = f.healthTags?.slice(0, 3).join(', ') || '';
+      const ingr    = f.ingredients?.slice(0, 4).map((i) => i.replace(/\s*\(.*?\)/g, '').trim()).join(', ') || '';
+      const suitable  = f.suitableFor?.slice(0, 2).join(', ') || '';
+      const warning   = f.warningFor?.slice(0, 2).join(', ')  || '';
+      const rating    = f.ratingAverage ? `★${f.ratingAverage.toFixed(1)}` : '';
+      const sold      = f.soldCount     ? `đã bán ${f.soldCount}` : '';
+      const parts = [
+        `• ${f.name} | ${priceStr}`,
+        nutStr    && `[${nutStr}]`,
+        tags      && `tags: ${tags}`,
+        ingr      && `TP: ${ingr}`,
+        suitable  && `phù hợp: ${suitable}`,
+        warning   && `tránh: ${warning}`,
+        (rating || sold) && [rating, sold].filter(Boolean).join(', '),
+      ].filter(Boolean).join(' | ');
+      return parts;
+    };
+
+    // Sắp xếp món trong mỗi danh mục theo độ phổ biến (rating × soldCount)
+    // → AI ưu tiên gợi ý món bán chạy / được đánh giá cao hơn mặc định
+    const sortByPopularity = (foods) =>
+      [...foods].sort((a, b) => {
+        const scoreA = (a.ratingAverage || 0) * Math.log1p(a.soldCount || 0);
+        const scoreB = (b.ratingAverage || 0) * Math.log1p(b.soldCount || 0);
+        return scoreB - scoreA;
+      });
+
+    const grouped = groupByCategory(availableFoods);
+    const availableFoodContext = Object.entries(grouped)
+      .map(([cat, foods]) => `[${cat}]\n${sortByPopularity(foods).map(formatFoodLine).join('\n')}`)
+      .join('\n\n');
 
     // Format danh sách món tạm hết gọn gàng
     const unavailableFoodContext = unavailableFoods.length > 0
@@ -198,7 +225,7 @@ export const recommendFood = async (req, res) => {
 
     // Nhận diện nhanh nếu khách hỏi đích danh món đang tạm hết
     const removeAccents = (str = '') =>
-      str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/đ/g, 'd').trim();
+      str.replace(/đ/gi, 'd').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 
     const cleanMsg = removeAccents(message);
     const mentionedUnavailableFoods = unavailableFoods.filter((f) => {
@@ -322,7 +349,7 @@ THÔNG TIN KHÁCH HÀNG HIỆN TẠI:
 ${recentOrdersContext}${unavailableNotice}
 
 ════════════════════════════════════════════════════════════
-THỰC ĐƠN ĐANG PHỤC VỤ (CÒN HÀNG - CÓ THỂ ĐẶT MÓN):
+THỰC ĐƠN ĐANG PHỤC VỤ — TOÀN BỘ (nhóm theo danh mục, còn hàng, có thể đặt món):
 ${availableFoodContext}
 
 ════════════════════════════════════════════════════════════
@@ -337,12 +364,17 @@ THÔNG TIN CỬA HÀNG & CHÍNH SÁCH DỊCH VỤ FOODCARE:
 • Phương thức thanh toán: Tiền mặt khi nhận hàng (COD), Ví điện tử MoMo (quét mã QR tức thì), Chuyển khoản ngân hàng.
 • Chính sách thành viên:
   - Hạng Thành viên: Tích lũy chi tiêu trên mỗi đơn.
-  - Hạng Vàng (Tổng chi tiêu ≥ 1.000.000đ): Giảm giá 5% mọi đơn hàng, ưu tiên chuẩn bị món.
-  - Hạng Kim Cương (Tổng chi tiêu ≥ 3.000.000đ): Giảm giá 10% trọn đời, quà tặng sinh nhật đặc quyền.
+  - Hạng Vàng (Tổng chi tiêu ≥ 5.000.000đ): Giảm giá 5% mọi đơn hàng, ưu tiên chuẩn bị món.
+  - Hạng Kim Cương (Tổng chi tiêu ≥ 20.000.000đ): Giảm giá 10% trọn đời, quà tặng sinh nhật đặc quyền.
 • Cam kết chất lượng: 100% nguyên liệu tươi sạch chuẩn VietGAP, công thức được thẩm định bởi chuyên gia dinh dưỡng, hệ thống cảnh báo dị ứng tự động bảo vệ thực khách.
 
 ════════════════════════════════════════════════════════════
 HƯỚNG DẪN XỬ LÝ THEO TỪNG NHÓM CÂU HỎI (QUY CHUẨN ĐẶC BIỆT):
+
+0. NGUYÊN TẮC LỌC MÓN ĂN THEO NGỮ NGHĨA (QUAN TRỌNG NHẤT):
+   - Bạn nhận được TOÀN BỘ thực đơn (nhóm theo danh mục). Hãy TỰ LỌC dựa trên ý định thực sự của khách.
+   - Ví dụ: "khát nước" → lọc danh mục đồ uống. "muốn ăn nhẹ" → lọc bữa phụ/snack. "giảm cân" → lọc tag eat clean, ít calo. "tập gym" → lọc tag giàu đạm, tăng cơ. "chay" → lọc món không có thịt/cá.
+   - KHÔNG BAO GIỜ tự bịa thông tin hết hàng nếu món KHÔNG có trong "DANH SÁCH MÓN TẠM HẾT".
 
 1. KHÁCH HỎI VỀ BẢN THÂN / THỂ TRẠNG / CÂN NẶNG / CHIỀU CAO / BMI / DỊ ỨNG:
    - Trả lời chính xác các số liệu đã lưu: Cân nặng (${hp.weight ? hp.weight + ' kg' : 'chưa cập nhật'}), Chiều cao (${hp.height ? hp.height + ' cm' : 'chưa cập nhật'}), chỉ số BMI kèm phân loại (lý tưởng, thừa cân...), mục tiêu sức khỏe và danh sách dị ứng.

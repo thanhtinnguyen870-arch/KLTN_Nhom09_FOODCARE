@@ -77,23 +77,26 @@ export const updateOrderStatus = async (req, res) => {
       order.orderStatus = req.body.status;
       
       if (req.body.status === 'completed' && oldStatus !== 'completed') {
+        const wasAlreadyPaid = order.paymentStatus === 'paid';
         order.paymentStatus = 'paid';
-        
-        // Cập nhật tổng chi tiêu và thăng hạng
-        const user = await User.findById(order.user);
-        if (user) {
-          user.totalSpent = (user.totalSpent || 0) + order.totalAmount;
-          if (user.totalSpent >= 20000000) {
-            user.tier = 'Kim Cương';
-          } else if (user.totalSpent >= 5000000) {
-            user.tier = 'Vàng';
-          } else {
-            user.tier = 'Thành viên';
+
+        // Chỉ cộng totalSpent nếu đơn chưa được tính trước đó (COD chưa paid)
+        if (!wasAlreadyPaid) {
+          const user = await User.findById(order.user);
+          if (user) {
+            user.totalSpent = (user.totalSpent || 0) + order.totalAmount;
+            if (user.totalSpent >= 20000000) {
+              user.tier = 'Kim Cương';
+            } else if (user.totalSpent >= 5000000) {
+              user.tier = 'Vàng';
+            } else {
+              user.tier = 'Thành viên';
+            }
+            await user.save();
           }
-          await user.save();
         }
       } else if (oldStatus === 'completed' && req.body.status && req.body.status !== 'completed') {
-        // Giảm trừ tổng chi tiêu nếu hủy bỏ trạng thái completed
+        // Giảm trừ tổng chi tiêu nếu hủy bỏ trạng thái completed (chỉ trừ nếu paymentStatus đang là paid do completed tạo ra)
         const user = await User.findById(order.user);
         if (user) {
           user.totalSpent = Math.max(0, (user.totalSpent || 0) - order.totalAmount);
@@ -121,6 +124,43 @@ export const updateOrderStatus = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+// @desc    Update order payment status (Admin check bank payment)
+// @route   PUT /api/admin/orders/:id/payment-status
+// @access  Private/Admin
+export const updateOrderPaymentStatus = async (req, res) => {
+  try {
+    const { paymentStatus } = req.body;
+    if (!['unpaid', 'paid'].includes(paymentStatus)) {
+      return res.status(400).json({ message: 'Trạng thái thanh toán không hợp lệ.' });
+    }
+
+    const order = await Order.findById(req.params.id);
+    if (!order) {
+      return res.status(404).json({ message: 'Đơn hàng không tồn tại.' });
+    }
+
+    if (order.orderStatus === 'cancelled') {
+      return res.status(400).json({ message: 'Không thể thay đổi thanh toán của đơn hàng đã hủy.' });
+    }
+
+    order.paymentStatus = paymentStatus;
+    // Nếu nhân viên check xác nhận đã nhận tiền thì tự động chuyển pending sang confirmed
+    if (paymentStatus === 'paid' && order.orderStatus === 'pending') {
+      order.orderStatus = 'confirmed';
+    }
+
+    const updatedOrder = await order.save();
+
+    const io = req.app.get('io');
+    if (io) io.emit('orderUpdated', updatedOrder);
+
+    res.json(updatedOrder);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 
 // @desc    Get all users (customers)
 // @route   GET /api/admin/users

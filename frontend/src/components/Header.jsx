@@ -101,21 +101,23 @@ const Header = () => {
         </nav>
 
         <div className="hidden items-center gap-6 md:flex">
-          {user && !isAdmin && (
+          {!isAdmin && (
             <>
-              <Link to="/favorites" className="relative text-gray-700 transition-colors hover:text-red-500" title="Yêu thích">
-                <Heart
-                  size={24}
-                  fill={favCount > 0 ? 'currentColor' : 'none'}
-                  className={favCount > 0 ? 'text-red-500' : ''}
-                />
-                {favCount > 0 && (
-                  <span className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs text-white">
-                    {favCount}
-                  </span>
-                )}
-              </Link>
-              <Link to="/cart" className="relative text-gray-700 transition-colors hover:text-primary">
+              {user && (
+                <Link to="/favorites" className="relative text-gray-700 transition-colors hover:text-red-500" title="Yêu thích">
+                  <Heart
+                    size={24}
+                    fill={favCount > 0 ? 'currentColor' : 'none'}
+                    className={favCount > 0 ? 'text-red-500' : ''}
+                  />
+                  {favCount > 0 && (
+                    <span className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs text-white">
+                      {favCount}
+                    </span>
+                  )}
+                </Link>
+              )}
+              <Link to="/cart" className="relative text-gray-700 transition-colors hover:text-primary" title="Giỏ hàng">
                 <ShoppingCart size={24} />
                 {cartCount > 0 && (
                   <span className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs text-white">
@@ -141,7 +143,11 @@ const Header = () => {
                 className="flex items-center gap-2 font-semibold text-gray-700 transition-colors hover:text-primary"
               >
                 <img
-                  src={user.avatar}
+                  src={user.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=200&auto=format&fit=crop'}
+                  onError={(e) => {
+                    e.currentTarget.onerror = null;
+                    e.currentTarget.src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=200&auto=format&fit=crop';
+                  }}
                   alt="avatar"
                   className="h-8 w-8 rounded-full border border-primary object-cover"
                   width="32"
@@ -196,15 +202,17 @@ const Header = () => {
           </Link>
         ))}
         <div className="mt-3 border-t border-gray-100 pt-3 flex flex-col gap-3">
-          {user && !isAdmin && (
+          {!isAdmin && (
             <>
-              <Link to="/favorites" className="flex items-center gap-3 font-semibold text-gray-700 hover:text-red-500">
-                <Heart size={20} fill={favCount > 0 ? 'currentColor' : 'none'} className={favCount > 0 ? 'text-red-500' : ''} />
-                <span>Yêu thích</span>
-                {favCount > 0 && (
-                  <span className="ml-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs text-white">{favCount}</span>
-                )}
-              </Link>
+              {user && (
+                <Link to="/favorites" className="flex items-center gap-3 font-semibold text-gray-700 hover:text-red-500">
+                  <Heart size={20} fill={favCount > 0 ? 'currentColor' : 'none'} className={favCount > 0 ? 'text-red-500' : ''} />
+                  <span>Yêu thích</span>
+                  {favCount > 0 && (
+                    <span className="ml-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs text-white">{favCount}</span>
+                  )}
+                </Link>
+              )}
               <Link to="/cart" className="flex items-center gap-3 font-semibold text-gray-700 hover:text-primary">
                 <ShoppingCart size={20} />
                 <span>Giỏ hàng</span>
@@ -221,7 +229,18 @@ const Header = () => {
                 <span>Lịch sử AI</span>
               </Link>
               <Link to={isAdmin ? '/admin' : '/profile'} className="flex items-center gap-3 font-semibold text-gray-700 hover:text-primary">
-                <img src={user.avatar} alt="avatar" className="h-7 w-7 rounded-full border border-primary object-cover" width="28" height="28" loading="lazy" />
+                <img
+                  src={user.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=200&auto=format&fit=crop'}
+                  onError={(e) => {
+                    e.currentTarget.onerror = null;
+                    e.currentTarget.src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=200&auto=format&fit=crop';
+                  }}
+                  alt="avatar"
+                  className="h-7 w-7 rounded-full border border-primary object-cover"
+                  width="28"
+                  height="28"
+                  loading="lazy"
+                />
                 <span>{user.name}</span>
               </Link>
               <button onClick={handleLogout} className="flex items-center gap-3 font-semibold text-red-600 hover:text-red-700">

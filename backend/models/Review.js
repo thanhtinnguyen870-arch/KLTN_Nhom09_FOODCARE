@@ -15,6 +15,11 @@ const reviewSchema = mongoose.Schema(
       ref: 'User',
       required: true,
     },
+    // Lưu lại tên tại thời điểm đánh giá (phòng khi user đổi tên sau)
+    name: {
+      type: String,
+      default: '',
+    },
     food: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Food',

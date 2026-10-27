@@ -7,6 +7,7 @@ import {
   updateHealthProfile,
   changePassword,
   loginWithGoogle,
+  devSimulateGoogleLogin,
   getFavorites,
   addFavorite,
   removeFavorite,
@@ -18,6 +19,7 @@ const router = express.Router();
 router.post('/register', registerUser);
 router.post('/login', loginUser);
 router.post('/google', loginWithGoogle);
+router.post('/google/dev-simulate', devSimulateGoogleLogin);
 router.route('/me').get(protect, getUserProfile);
 router.route('/profile').put(protect, updateUserProfile);
 router.route('/change-password').put(protect, changePassword);

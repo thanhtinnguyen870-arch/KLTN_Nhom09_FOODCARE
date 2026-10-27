@@ -78,8 +78,20 @@ export const FavoriteProvider = ({ children }) => {
 
   const isFavorited = useCallback((foodId) => favoriteIds.has(foodId), [favoriteIds]);
 
+  const toggleFavorite = useCallback(async (food) => {
+    if (!user) {
+      toast.info('Vui lòng đăng nhập để lưu món yêu thích!');
+      return;
+    }
+    if (favoriteIds.has(food._id)) {
+      await removeFavorite(food);
+    } else {
+      await addFavorite(food);
+    }
+  }, [user, favoriteIds, addFavorite, removeFavorite]);
+
   return (
-    <FavoriteContext.Provider value={{ favoriteIds, addFavorite, removeFavorite, isFavorited }}>
+    <FavoriteContext.Provider value={{ favoriteIds, addFavorite, removeFavorite, toggleFavorite, isFavorited }}>
       {children}
     </FavoriteContext.Provider>
   );

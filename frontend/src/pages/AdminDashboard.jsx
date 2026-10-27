@@ -162,6 +162,8 @@ const AdminDashboard = () => {
   // Search & filter states
   const [orderSearchTerm, setOrderSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [orderPaymentStatusFilter, setOrderPaymentStatusFilter] = useState('all');
+  const [orderPaymentMethodFilter, setOrderPaymentMethodFilter] = useState('all');
   const [foodSearchTerm, setFoodSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [availabilityFilter, setAvailabilityFilter] = useState('all');
@@ -419,6 +421,41 @@ const AdminDashboard = () => {
       .reduce((sum, order) => sum + (order.totalAmount || 0), 0);
   }, [orders]);
 
+  const overviewStats = useMemo(() => {
+    const now = new Date();
+    const todayStr = now.toDateString();
+    const weekAgo = new Date(now); weekAgo.setDate(weekAgo.getDate() - 7);
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const filteredOrders = orders.filter(order => {
+      if (order.orderStatus === 'cancelled') return false;
+      const orderDate = new Date(order.createdAt);
+      if (overviewTimeRange === 'today') return orderDate.toDateString() === todayStr;
+      if (overviewTimeRange === 'week') return orderDate >= weekAgo;
+      if (overviewTimeRange === 'month') return orderDate >= startOfMonth;
+      return true;
+    });
+
+    const revenue = filteredOrders
+      .filter(o => o.paymentStatus === 'paid')
+      .reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+
+    const filteredUsersCount = users.filter(user => {
+      if (!user.createdAt) return false;
+      const joinDate = new Date(user.createdAt);
+      if (overviewTimeRange === 'today') return joinDate.toDateString() === todayStr;
+      if (overviewTimeRange === 'week') return joinDate >= weekAgo;
+      if (overviewTimeRange === 'month') return joinDate >= startOfMonth;
+      return true;
+    }).length;
+
+    return {
+      revenue,
+      ordersCount: filteredOrders.length,
+      usersCount: filteredUsersCount
+    };
+  }, [orders, users, overviewTimeRange]);
+
   const adminMetrics = useMemo(() => {
     const activeOrders = orders.filter((order) => !['completed', 'cancelled'].includes(order.orderStatus)).length;
     const shippingOrders = orders.filter((order) => order.orderStatus === 'shipping').length;
@@ -505,15 +542,55 @@ const AdminDashboard = () => {
       .slice(0, 5);
   }, [foods, orders]);
 
-  // Filtered orders
+  // Filtered orders (Hỗ trợ tìm kiếm thông minh: mã đơn có/không #, tên món, SĐT, email, và lọc thanh toán)
   const filteredOrders = useMemo(() => {
-    const term = orderSearchTerm.toLowerCase().trim();
+    const rawTerm = orderSearchTerm.trim().toLowerCase();
+    const cleanTerm = rawTerm.replace(/^#/, '').trim();
+
     return orders.filter((order) => {
-      const matchesStatus = statusFilter === 'all' || order.orderStatus === statusFilter;
-      const searchable = `${order._id} ${order.user?.name || ''} ${order.email || ''} ${order.phone || ''}`.toLowerCase();
-      return matchesStatus && searchable.includes(term);
+      // 1. Lọc theo trạng thái đơn hàng (statusFilter)
+      if (statusFilter !== 'all' && order.orderStatus !== statusFilter) return false;
+
+      // 2. Lọc theo trạng thái thanh toán (orderPaymentStatusFilter)
+      if (orderPaymentStatusFilter !== 'all' && order.paymentStatus !== orderPaymentStatusFilter) return false;
+
+      // 3. Lọc theo phương thức thanh toán (orderPaymentMethodFilter)
+      if (orderPaymentMethodFilter !== 'all' && order.paymentMethod !== orderPaymentMethodFilter) return false;
+
+      if (!cleanTerm) return true;
+
+      const orderId = String(order._id || '').toLowerCase();
+      const shortId = orderId.slice(-8);
+      const withHash = `#${orderId}`;
+      const shortWithHash = `#${shortId}`;
+
+      const userName = String(order.user?.name || '').toLowerCase();
+      const email = String(order.email || '').toLowerCase();
+      const phone = String(order.phone || '').toLowerCase();
+      const address = String(order.shippingAddress || '').toLowerCase();
+      const note = String(order.note || '').toLowerCase();
+      const itemsNames = (order.items || []).map((i) => i.name || '').join(' ').toLowerCase();
+      const payMethod = String(order.paymentMethod || '').toLowerCase();
+      const payStatusText = order.paymentStatus === 'paid' ? 'đã thanh toán paid' : 'chờ thanh toán chưa thanh toán unpaid';
+      const orderStatusText = statusLabels[order.orderStatus] ? statusLabels[order.orderStatus].toLowerCase() : '';
+
+      return (
+        orderId.includes(cleanTerm) ||
+        shortId.includes(cleanTerm) ||
+        withHash.includes(rawTerm) ||
+        shortWithHash.includes(rawTerm) ||
+        userName.includes(cleanTerm) ||
+        email.includes(cleanTerm) ||
+        phone.includes(cleanTerm) ||
+        address.includes(cleanTerm) ||
+        note.includes(cleanTerm) ||
+        itemsNames.includes(cleanTerm) ||
+        payMethod.includes(cleanTerm) ||
+        payStatusText.includes(cleanTerm) ||
+        orderStatusText.includes(cleanTerm)
+      );
     });
-  }, [orders, orderSearchTerm, statusFilter]);
+  }, [orders, orderSearchTerm, statusFilter, orderPaymentStatusFilter, orderPaymentMethodFilter]);
 
   // Order counts per status
   const orderStatusCounts = useMemo(() => {
@@ -739,6 +816,21 @@ const AdminDashboard = () => {
       toast.success(`Đã cập nhật đơn hàng thành: ${statusLabels[status]}`);
     } catch (error) {
       toast.error(error.response?.data?.message || 'Lỗi cập nhật đơn hàng.');
+    }
+  };
+
+  const handleUpdatePaymentStatus = async (id, paymentStatus) => {
+    try {
+      const { data } = await axiosClient.put(`/admin/orders/${id}/payment-status`, { paymentStatus });
+      setOrders((current) => current.map((order) => (order._id === id ? data : order)));
+      setSelectedOrder((current) => (current?._id === id ? data : current));
+      toast.success(
+        paymentStatus === 'paid'
+          ? 'Đã xác nhận thanh toán thành công cho đơn hàng!'
+          : 'Đã cập nhật trạng thái thanh toán.'
+      );
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Lỗi cập nhật thanh toán.');
     }
   };
 
@@ -1246,24 +1338,24 @@ const AdminDashboard = () => {
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <KpiCard
                   label="Tổng doanh thu"
-                  value={formatCurrency(stats?.totalRevenue || 0)}
-                  subtext={`Hôm nay: ${formatCurrency(revenueToday)}`}
+                  value={formatCurrency(overviewStats.revenue)}
+                  subtext={overviewTimeRange === 'today' ? `Hôm nay: ${formatCurrency(revenueToday)}` : `So với tổng: ${formatCurrency(stats?.totalRevenue || 0)}`}
                   icon={DollarSign}
                   badge="Ghi nhận"
                   tone="green"
                 />
                 <KpiCard
-                  label="Tổng đơn hàng"
-                  value={(stats?.totalOrders || 0).toLocaleString('vi-VN')}
-                  subtext={`${adminMetrics.activeOrders} đơn đang xử lý`}
+                  label="Đơn hàng"
+                  value={overviewStats.ordersCount.toLocaleString('vi-VN')}
+                  subtext={`Trong tổng ${stats?.totalOrders || 0} đơn`}
                   icon={ClipboardList}
                   badge={pendingOrdersCount > 0 ? `${pendingOrdersCount} chờ duyệt` : 'Đang hoạt động'}
                   tone="orange"
                 />
                 <KpiCard
-                  label="Khách hàng"
-                  value={(stats?.totalUsers || 0).toLocaleString('vi-VN')}
-                  subtext={`${adminMetrics.paidOrders} đơn đã hoàn tất`}
+                  label={overviewTimeRange === 'today' ? "Khách hàng mới" : "Khách hàng"}
+                  value={overviewStats.usersCount.toLocaleString('vi-VN')}
+                  subtext={`Trong tổng ${stats?.totalUsers || 0} KH`}
                   icon={Users}
                   badge="Người dùng"
                   tone="blue"
@@ -1498,16 +1590,68 @@ const AdminDashboard = () => {
                     <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#758278]" size={16} />
                     <input
                       type="text"
-                      placeholder="Tìm theo mã đơn (#...), tên khách hàng, SĐT..."
+                      placeholder="Tìm theo mã đơn (#...), tên khách, SĐT, món ăn..."
                       value={orderSearchTerm}
                       onChange={(e) => setOrderSearchTerm(e.target.value)}
-                      className="h-10 w-full rounded-xl border border-[#E8EEE9] bg-[#F7F9F6] pl-10 pr-4 text-xs font-medium text-[#17231D] outline-none transition focus:border-[#16845B] focus:bg-white"
+                      className="h-10 w-full rounded-xl border border-[#E8EEE9] bg-[#F7F9F6] pl-10 pr-9 text-xs font-medium text-[#17231D] outline-none transition focus:border-[#16845B] focus:bg-white"
                     />
+                    {orderSearchTerm && (
+                      <button
+                        type="button"
+                        onClick={() => setOrderSearchTerm('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-[#758278] hover:text-[#17231D] p-1"
+                        title="Xóa từ khóa tìm kiếm"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
                   </div>
-                  <div className="text-xs font-medium text-[#758278]">
-                    Hiển thị <span className="font-bold text-[#17231D]">{filteredOrders.length}</span> đơn hàng
+
+                  {/* Dropdowns lọc trạng thái & phương thức thanh toán */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={orderPaymentStatusFilter}
+                      onChange={(e) => setOrderPaymentStatusFilter(e.target.value)}
+                      className="h-10 rounded-xl border border-[#E8EEE9] bg-[#F7F9F6] px-3 text-xs font-semibold text-[#17231D] outline-none focus:border-[#16845B]"
+                    >
+                      <option value="all">Tất cả thanh toán</option>
+                      <option value="paid">Đã thanh toán</option>
+                      <option value="unpaid">Chờ thanh toán</option>
+                    </select>
+
+                    <select
+                      value={orderPaymentMethodFilter}
+                      onChange={(e) => setOrderPaymentMethodFilter(e.target.value)}
+                      className="h-10 rounded-xl border border-[#E8EEE9] bg-[#F7F9F6] px-3 text-xs font-semibold text-[#17231D] outline-none focus:border-[#16845B]"
+                    >
+                      <option value="all">Tất cả phương thức</option>
+                      <option value="BANK">Chuyển khoản (BANK)</option>
+                      <option value="MOMO">Ví MoMo</option>
+                      <option value="COD">Tiền mặt (COD)</option>
+                    </select>
+
+                    {(orderSearchTerm || statusFilter !== 'all' || orderPaymentStatusFilter !== 'all' || orderPaymentMethodFilter !== 'all') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOrderSearchTerm('');
+                          setStatusFilter('all');
+                          setOrderPaymentStatusFilter('all');
+                          setOrderPaymentMethodFilter('all');
+                        }}
+                        className="h-10 rounded-xl border border-gray-200 bg-gray-100 hover:bg-gray-200 px-3 text-xs font-semibold text-gray-700 transition-colors"
+                        title="Đặt lại toàn bộ bộ lọc và tìm kiếm"
+                      >
+                        Đặt lại
+                      </button>
+                    )}
+
+                    <div className="text-xs font-medium text-[#758278] whitespace-nowrap pl-2">
+                      Hiển thị <span className="font-bold text-[#17231D]">{filteredOrders.length}</span> đơn hàng
+                    </div>
                   </div>
                 </div>
+
 
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
@@ -1544,15 +1688,30 @@ const AdminDashboard = () => {
                               {formatDate(order.createdAt)}
                             </td>
                             <td className="px-5 py-4 whitespace-nowrap">
-                              <span
-                                className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-bold ${
-                                  order.paymentStatus === 'paid'
-                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                    : 'bg-amber-50 text-amber-700 border border-amber-200'
-                                }`}
-                              >
-                                {order.paymentStatus === 'paid' ? 'Đã thanh toán' : 'Chờ thanh toán'}
-                              </span>
+                              <div className="flex flex-col gap-1 items-start">
+                                <div className="flex items-center gap-1.5">
+                                  <span
+                                    className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-bold ${
+                                      order.paymentStatus === 'paid'
+                                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                        : 'bg-amber-50 text-amber-700 border border-amber-200'
+                                    }`}
+                                  >
+                                    {order.paymentStatus === 'paid' ? 'Đã thanh toán' : 'Chờ thanh toán'}
+                                  </span>
+                                  <span className="text-[10px] text-gray-500 font-semibold">({order.paymentMethod})</span>
+                                </div>
+                                {order.paymentStatus !== 'paid' && order.orderStatus !== 'cancelled' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdatePaymentStatus(order._id, 'paid')}
+                                    className="inline-flex items-center gap-1 rounded bg-emerald-600 hover:bg-emerald-700 px-2 py-0.5 text-[10px] font-bold text-white shadow-sm transition-all"
+                                    title="Nhân viên kiểm tra tiền vào tài khoản MB Bank và bấm xác nhận"
+                                  >
+                                    <Check size={11} /> Xác nhận đã nhận
+                                  </button>
+                                )}
+                              </div>
                             </td>
                             <td className="px-5 py-4 text-right font-bold text-xs text-[#17231D] whitespace-nowrap">
                               {formatCurrency(order.totalAmount)}
@@ -1590,6 +1749,20 @@ const AdminDashboard = () => {
                             <ClipboardList className="mx-auto mb-3 text-[#758278]/40" size={32} />
                             <p className="font-bold text-sm text-[#17231D]">Không tìm thấy đơn hàng nào</p>
                             <p className="mt-1 text-xs text-[#758278]">Thử đổi từ khóa tìm kiếm hoặc bỏ chọn bộ lọc trạng thái.</p>
+                            {(orderSearchTerm || statusFilter !== 'all' || orderPaymentStatusFilter !== 'all' || orderPaymentMethodFilter !== 'all') && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOrderSearchTerm('');
+                                  setStatusFilter('all');
+                                  setOrderPaymentStatusFilter('all');
+                                  setOrderPaymentMethodFilter('all');
+                                }}
+                                className="mt-3.5 inline-flex items-center gap-1.5 rounded-xl bg-[#16845B] hover:bg-[#116344] px-4 py-2 text-xs font-bold text-white shadow-sm transition-all"
+                              >
+                                Đặt lại tất cả bộ lọc &amp; tìm kiếm
+                              </button>
+                            )}
                           </td>
                         </tr>
                       )}
@@ -2729,9 +2902,9 @@ const AdminDashboard = () => {
                 <StatusBadge status={selectedOrder.orderStatus} />
               </div>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 text-xs">
-                <div>
+                <div className="min-w-0">
                   <span className="text-[10px] text-[#758278]">Mã đơn:</span>
-                  <p className="font-mono font-bold text-[#17231D]">#{selectedOrder._id?.toUpperCase()}</p>
+                  <p className="font-mono font-bold text-[#17231D] truncate" title={`#${selectedOrder._id?.toUpperCase()}`}>#{selectedOrder._id?.toUpperCase()}</p>
                 </div>
                 <div>
                   <span className="text-[10px] text-[#758278]">Ngày đặt:</span>
@@ -2788,6 +2961,31 @@ const AdminDashboard = () => {
                   </div>
                 ))}
               </div>
+            </div>
+
+            {/* Payment Check & Confirmation */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl bg-emerald-50/70 p-4 border border-emerald-200/80">
+              <div>
+                <span className="text-xs font-bold text-emerald-950 block">
+                  Phương thức thanh toán: {selectedOrder.paymentMethod} {selectedOrder.paymentMethod === 'BANK' ? '(MB Bank - 0383024159)' : ''}
+                </span>
+                <p className="text-[11px] text-emerald-800 mt-0.5">
+                  Trạng thái tiền: <strong>{selectedOrder.paymentStatus === 'paid' ? 'ĐÃ THANH TOÁN' : 'CHỜ THANH TOÁN'}</strong>
+                </p>
+              </div>
+              {selectedOrder.paymentStatus !== 'paid' && selectedOrder.orderStatus !== 'cancelled' ? (
+                <button
+                  type="button"
+                  onClick={() => handleUpdatePaymentStatus(selectedOrder._id, 'paid')}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3.5 py-2 text-xs font-bold text-white shadow-sm transition-all shrink-0"
+                >
+                  <Check size={15} /> Xác nhận đã nhận tiền {selectedOrder.paymentMethod === 'BANK' ? '(MB Bank)' : ''}
+                </button>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 bg-white px-3 py-1.5 rounded-lg border border-emerald-200">
+                  <Check size={14} className="text-emerald-600" /> Đã xác nhận thanh toán
+                </span>
+              )}
             </div>
 
             {/* Update status directly from modal */}

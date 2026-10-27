@@ -99,9 +99,29 @@ export const AuthProvider = ({ children }) => {
       toast.success('Đăng nhập bằng Google thành công!');
       return { success: true, user: data };
     } catch (error) {
+      console.error('Google login error chi tiết:', error);
+      const detailMessage =
+        error.response?.data?.message ||
+        (error.message?.includes('Network Error') ? 'Không thể kết nối đến máy chủ backend (Port 5000).' : '') ||
+        error.message ||
+        'Đăng nhập Google không thành công.';
       return {
         success: false,
-        message: error.response?.data?.message || 'Đăng nhập Google không thành công.',
+        message: detailMessage,
+      };
+    }
+  }, []);
+
+  const devGoogleLogin = useCallback(async (email) => {
+    try {
+      const { data } = await axiosClient.post('/auth/google/dev-simulate', { email });
+      storeAuthenticatedUser(data);
+      toast.success('Đăng nhập Google (Chế độ phát triển) thành công!');
+      return { success: true, user: data };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Giả lập đăng nhập Google không thành công.',
       };
     }
   }, []);
@@ -126,7 +146,7 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, googleLogin, register, logout, updateUser }}>
+    <AuthContext.Provider value={{ user, loading, login, googleLogin, devGoogleLogin, register, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   );

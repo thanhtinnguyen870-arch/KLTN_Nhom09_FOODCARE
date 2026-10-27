@@ -53,19 +53,26 @@ const Login = () => {
     }
   }, [user, redirectAfterLogin]);
 
-  /* lock scroll while on login page */
+  // Lưu reference callback mới nhất để HMR/Strict Mode không làm mất state
   useEffect(() => {
-    document.documentElement.style.overflow = 'hidden';
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.documentElement.style.overflow = '';
-      document.body.style.overflow = '';
+    window.__google_login_callback = async ({ credential }) => {
+      if (!credential) return;
+      setIsLoading(true);
+      try {
+        const result = await googleLogin(credential);
+        if (result.success) {
+          redirectAfterLogin(result.user);
+        } else {
+          toast.error(result.message);
+        }
+      } finally {
+        setIsLoading(false);
+      }
     };
-  }, []);
+  }, [googleLogin, redirectAfterLogin]);
 
   useEffect(() => {
     if (!GOOGLE_CLIENT_ID) return undefined;
-
     let isSubscribed = true;
     let pollInterval = null;
 
@@ -73,26 +80,28 @@ const Login = () => {
       if (!isSubscribed || !googleButtonRef.current || !window.google?.accounts?.id) return false;
 
       try {
-        window.google.accounts.id.initialize({
-          client_id: GOOGLE_CLIENT_ID,
-          auto_select: false,
-          cancel_on_tap_outside: true,
-          callback: async ({ credential }) => {
-            if (!credential) return;
-            setIsLoading(true);
-            try {
-              const result = await googleLogin(credential);
-              if (result.success) {
-                redirectAfterLogin(result.user);
-              } else {
-                toast.error(result.message);
+        if (!window.__google_gsi_initialized) {
+          window.google.accounts.id.initialize({
+            client_id: GOOGLE_CLIENT_ID,
+            auto_select: false,
+            cancel_on_tap_outside: true,
+            use_fedcm_for_prompt: false,
+            callback: (res) => {
+              if (window.__google_login_callback) {
+                window.__google_login_callback(res);
               }
-            } finally {
-              setIsLoading(false);
-            }
-          },
-        });
+            },
+            error_callback: (err) => {
+              console.warn('[Google Auth Error]:', err);
+              if (err?.type === 'origin_mismatch') {
+                toast.error('Google Cloud chưa cho phép tên miền localhost:5173. Bạn có thể dùng nút Đăng nhập nhanh.');
+              }
+            },
+          });
+          window.__google_gsi_initialized = true;
+        }
 
+        // Xóa nội dung cũ và render lại nút Google vào DOM hiện tại
         googleButtonRef.current.innerHTML = '';
         window.google.accounts.id.renderButton(googleButtonRef.current, {
           type: 'icon',
@@ -101,6 +110,7 @@ const Login = () => {
           shape: 'circle',
           locale: 'vi',
         });
+        
         return true;
       } catch (err) {
         console.error('Lỗi khởi tạo Google button:', err);
@@ -108,9 +118,7 @@ const Login = () => {
       }
     };
 
-    // Thử khởi tạo ngay
     if (!renderGoogleBtn()) {
-      // Nếu SDK Google chưa load xong, poll định kỳ mỗi 80ms (tối đa 30 lần = 2.4s)
       let attempts = 0;
       pollInterval = setInterval(() => {
         attempts += 1;
@@ -124,7 +132,7 @@ const Login = () => {
       isSubscribed = false;
       if (pollInterval) clearInterval(pollInterval);
     };
-  }, [googleLogin, redirectAfterLogin]);
+  }, []);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -307,8 +315,7 @@ const Login = () => {
       </div>
 
       {/* ── Page wrapper (sits above background) ── */}
-      <div className="relative z-10 flex items-center justify-center px-4"
-           style={{ height: 'calc(100vh - 80px)', overflow: 'hidden' }}>
+      <div className="relative z-10 flex items-center justify-center px-4 py-6 min-h-[calc(100vh-80px)] overflow-y-auto">
 
         {/* ── Glassmorphism card ── */}
         <div className="login-card-anim w-full max-w-[420px]"
@@ -320,6 +327,8 @@ const Login = () => {
             borderRadius: 28,
             boxShadow: '0 32px 80px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.06) inset',
             padding: '44px 40px 36px',
+            maxHeight: 'calc(100vh - 100px)',
+            overflowY: 'auto',
           }}>
 
           {/* Logo */}

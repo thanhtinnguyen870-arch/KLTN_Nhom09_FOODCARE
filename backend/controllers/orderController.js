@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import Order from '../models/Order.js';
 import Food from '../models/Food.js';
 import sendOrderConfirmationEmail from '../utils/sendEmail.js';
@@ -106,10 +107,17 @@ export const addOrderItems = async (req, res) => {
     // The order remains successful even if the email provider is temporarily unavailable.
     const emailNotificationSent = await sendOrderConfirmationEmail(createdOrder, recipientEmail);
 
-    // Cập nhật soldCount và trừ stock cho từng món ăn
+    // Cập nhật soldCount và trừ stock cho từng món ăn (atomic: chỉ trừ khi còn đủ hàng)
     const stockAndSoldUpdates = normalizedItems.map((item) => ({
       updateOne: {
-        filter: { _id: item.food },
+        filter: {
+          _id: item.food,
+          // Atomic guard: chỉ thực hiện khi stock còn đủ (tránh race condition multi-user)
+          $or: [
+            { stock: { $gte: item.quantity } },
+            { stock: null }, // Nếu chưa set stock thì bỏ qua constraint
+          ],
+        },
         update: {
           $inc: { soldCount: item.quantity, stock: -item.quantity },
         },
@@ -147,10 +155,14 @@ export const getMyOrders = async (req, res) => {
 // @access  Private
 export const getOrderById = async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
     const order = await Order.findById(req.params.id).populate('user', 'name email');
 
     if (order) {
-      if (order.user._id.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      const orderUserId = order.user?._id?.toString() || order.user?.toString();
+      if (orderUserId && orderUserId !== req.user._id.toString() && req.user.role !== 'admin') {
         return res.status(401).json({ message: 'Not authorized to view this order' });
       }
       res.json(order);
@@ -167,10 +179,14 @@ export const getOrderById = async (req, res) => {
 // @access  Private
 export const cancelOrder = async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(404).json({ message: 'Không tìm thấy đơn hàng' });
+    }
     const order = await Order.findById(req.params.id);
 
     if (order) {
-      if (order.user.toString() !== req.user._id.toString()) {
+      const orderUserId = order.user?._id?.toString() || order.user?.toString();
+      if (orderUserId && orderUserId !== req.user._id.toString()) {
          return res.status(401).json({ message: 'Không có quyền thao tác trên đơn hàng này.' });
       }
       if (order.orderStatus !== 'pending') {
