@@ -181,8 +181,8 @@ const Profile = () => {
   useEffect(() => {
     if (!user?._id) return;
 
-    const baseUrl = import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace('/api', '') : 'http://localhost:5000';
-    const socket = io(baseUrl);
+    const baseUrl = import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace(/\/api\/?$/, '') : '';
+    const socket = io(baseUrl || window.location.origin);
 
     const upsertOwnOrder = (incomingOrder) => {
       if (getOrderUserId(incomingOrder) !== user._id) return;

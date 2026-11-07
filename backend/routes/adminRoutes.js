@@ -10,6 +10,8 @@ import {
   updateUserInfo,
   getNotifications,
   markNotificationAsRead,
+  deleteNotification,
+  clearAllNotifications,
 } from '../controllers/adminController.js';
 import { protect, admin } from '../middleware/authMiddleware.js';
 
@@ -23,7 +25,12 @@ router.route('/users').get(protect, admin, getAdminUsers);
 router.route('/users/:id').put(protect, admin, updateUserInfo);
 router.route('/users/:id/block').put(protect, admin, updateUserBlockStatus);
 router.route('/foods').get(protect, admin, getAdminFoods);
-router.route('/notifications').get(protect, admin, getNotifications);
-router.route('/notifications/:id/read').put(protect, admin, markNotificationAsRead);
+router.route('/notifications')
+  .get(protect, admin, getNotifications)
+  .delete(protect, admin, clearAllNotifications);
+router.route('/notifications/:id')
+  .delete(protect, admin, deleteNotification);
+router.route('/notifications/:id/read')
+  .put(protect, admin, markNotificationAsRead);
 
 export default router;

@@ -1,7 +1,9 @@
 import axios from 'axios';
 
 const axiosClient = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
+  // Development: dùng relative URL '/api' → Vite proxy forward tới backend
+  // Production:  đặt VITE_API_URL = 'https://api.domain.com/api' trong .env
+  baseURL: import.meta.env.VITE_API_URL || '/api',
   headers: {
     'Content-Type': 'application/json',
   },

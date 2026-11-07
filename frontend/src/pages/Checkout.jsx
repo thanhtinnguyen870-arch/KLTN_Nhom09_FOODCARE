@@ -116,6 +116,24 @@ const Checkout = () => {
         return;
       }
 
+      if (paymentMethod === 'VNPAY') {
+        clearCart();
+        try {
+          const { data: vnpayData } = await axiosClient.post('/payments/vnpay/create', {
+            orderId: createdOrder._id,
+          });
+          if (vnpayData?.paymentUrl) {
+            window.location.href = vnpayData.paymentUrl;
+            return;
+          }
+          throw new Error('Không nhận được liên kết thanh toán từ cổng VNPay');
+        } catch (paymentError) {
+          toast.error('Không thể tạo liên kết thanh toán VNPay: ' + (paymentError.response?.data?.message || paymentError.message));
+          navigate('/profile?tab=tracking');
+          return;
+        }
+      }
+
       if (paymentMethod === 'BANK') {
         setBankOrderForQr(createdOrder);
         setIsBankModalOpen(true);
@@ -325,53 +343,36 @@ const Checkout = () => {
                   </div>
                 </label>
 
-                <label className={`flex items-center gap-4 p-4 border-2 rounded-2xl cursor-pointer transition-all ${paymentMethod === 'BANK' ? 'bg-[#E8F5EE] border-primary shadow-sm' : 'border-gray-100 hover:border-gray-300 hover:bg-gray-50'}`}>
+                <label className={`flex items-center gap-4 p-4 border-2 rounded-2xl cursor-pointer transition-all ${paymentMethod === 'VNPAY' ? 'bg-[#E8F5EE] border-primary shadow-sm' : 'border-gray-100 hover:border-gray-300 hover:bg-gray-50'}`}>
                   <input
                     type="radio"
                     name="payment"
-                    value="BANK"
-                    checked={paymentMethod === 'BANK'}
+                    value="VNPAY"
+                    checked={paymentMethod === 'VNPAY'}
                     onChange={(e) => setPaymentMethod(e.target.value)}
                     className="w-5 h-5 text-primary accent-primary"
                   />
-                  <span className="text-2xl">🏦</span>
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 border border-blue-200">
+                    <span className="font-black text-blue-600 text-xs tracking-tighter">VNPAY</span>
+                  </div>
                   <div className="flex flex-col">
                     <div className="flex items-center gap-2">
-                      <span className="font-bold text-dark">Chuyển khoản Ngân hàng (VietQR)</span>
-                      <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-200">
-                        MB Bank
+                      <span className="font-bold text-dark">Cổng thanh toán VNPAY</span>
+                      <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200">
+                        ATM / QR / Visa / Master
                       </span>
                     </div>
-                    <span className="text-sm text-gray-500">Quét mã QR qua app ngân hàng - tự động điền số tiền {finalAmount.toLocaleString('vi-VN')}đ</span>
+                    <span className="text-sm text-gray-500">Thanh toán bảo mật qua cổng VNPAY (Hỗ trợ hơn 40 ngân hàng &amp; thẻ quốc tế)</span>
                   </div>
                 </label>
 
-                {paymentMethod === 'BANK' && (
-                  <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-2xl ml-4 sm:ml-8 animate-fade-in space-y-3">
-                    <div className="flex items-center justify-between border-b border-emerald-200/60 pb-2">
-                      <span className="text-xs font-bold uppercase tracking-wider text-emerald-800">Thông tin tài khoản nhận:</span>
-                      <span className="text-[11px] font-semibold text-emerald-700 bg-white px-2 py-0.5 rounded-md border border-emerald-200">Napas 24/7</span>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                      <div>
-                        <span className="text-gray-500 block text-[11px]">Ngân hàng:</span>
-                        <strong className="text-gray-900">{BANK_CONFIG.bankName}</strong>
-                      </div>
-                      <div>
-                        <span className="text-gray-500 block text-[11px]">Số tài khoản:</span>
-                        <strong className="font-mono text-emerald-800 text-sm">{BANK_CONFIG.accountNo}</strong>
-                      </div>
-                      <div>
-                        <span className="text-gray-500 block text-[11px]">Chủ tài khoản:</span>
-                        <strong className="text-emerald-950 uppercase">{BANK_CONFIG.accountName}</strong>
-                      </div>
-                      <div>
-                        <span className="text-gray-500 block text-[11px]">Số tiền cần thanh toán:</span>
-                        <strong className="text-primary text-sm">{finalAmount.toLocaleString('vi-VN')} đ</strong>
-                      </div>
-                    </div>
-                    <p className="text-[11px] text-emerald-800 bg-white/80 p-2.5 rounded-xl border border-emerald-100">
-                      💡 Khi bấm <strong>&ldquo;Đặt hàng &amp; Lấy mã VietQR&rdquo;</strong>, hệ thống sẽ mở mã QR thông minh có sẵn đúng số tiền đơn hàng để bạn quét thanh toán nhanh.
+                {paymentMethod === 'VNPAY' && (
+                  <div className="p-4 bg-blue-50/60 border border-blue-100 rounded-2xl ml-4 sm:ml-8 animate-fade-in text-xs text-blue-900 space-y-1">
+                    <p className="font-semibold flex items-center gap-1.5">
+                      🔒 Kết nối bảo mật đến Cổng thanh toán VNPAY
+                    </p>
+                    <p className="text-slate-500">
+                      Sau khi xác nhận đơn hàng, hệ thống sẽ chuyển tiếp đến cổng thanh toán VNPAY để bạn nhập thông tin thẻ ngân hàng và xác thực mã OTP bảo mật.
                     </p>
                   </div>
                 )}
@@ -418,8 +419,8 @@ const Checkout = () => {
                 </>
               ) : paymentMethod === 'MOMO' ? (
                 '💳 Thanh toán với MoMo'
-              ) : paymentMethod === 'BANK' ? (
-                '🏦 Đặt hàng & Lấy mã VietQR Chuyển khoản'
+              ) : paymentMethod === 'VNPAY' ? (
+                '🏧 Thanh toán với VNPAY'
               ) : (
                 '✅ Xác nhận Đặt Hàng (COD)'
               )}

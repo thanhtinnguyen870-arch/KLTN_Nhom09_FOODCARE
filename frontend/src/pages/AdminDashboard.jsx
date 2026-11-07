@@ -40,7 +40,6 @@ import axiosClient from '../api/axiosClient';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
 
-
 const statusLabels = {
   pending: 'Chờ xác nhận',
   confirmed: 'Đã xác nhận',
@@ -323,9 +322,9 @@ const AdminDashboard = () => {
     if (!user || user.role !== 'admin') return;
 
     const baseUrl = import.meta.env.VITE_API_URL
-      ? import.meta.env.VITE_API_URL.replace('/api', '')
-      : 'http://localhost:5000';
-    const socket = io(baseUrl);
+      ? import.meta.env.VITE_API_URL.replace(/\/api\/?$/, '')
+      : '';
+    const socket = io(baseUrl || window.location.origin);
 
     socket.on('newOrder', (order) => {
       setOrders((prev) => [order, ...prev]);
@@ -390,6 +389,28 @@ const AdminDashboard = () => {
       toast.success('Đã đánh dấu tất cả thông báo là đã đọc');
     } catch {
       toast.error('Không thể cập nhật thông báo.');
+    }
+  };
+
+  const handleDeleteNotification = async (id, e) => {
+    if (e) e.stopPropagation();
+    try {
+      await axiosClient.delete(`/admin/notifications/${id}`);
+      setNotifications((current) => current.filter((n) => n._id !== id));
+      toast.success('Đã xóa thông báo');
+    } catch {
+      toast.error('Không thể xóa thông báo.');
+    }
+  };
+
+  const handleClearAllNotifications = async () => {
+    if (!window.confirm('Bạn có chắc chắn muốn xóa toàn bộ thông báo không?')) return;
+    try {
+      await axiosClient.delete('/admin/notifications');
+      setNotifications([]);
+      toast.success('Đã xóa toàn bộ thông báo');
+    } catch {
+      toast.error('Không thể xóa tất cả thông báo.');
     }
   };
 
@@ -1229,25 +1250,6 @@ const AdminDashboard = () => {
 
           {/* Right Header Actions */}
           <div className="flex items-center gap-3">
-            {/* Real-time Indicator */}
-            <div className="hidden md:flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/70 px-2.5 py-1 text-xs font-semibold text-emerald-800">
-              <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-600"></span>
-              </span>
-              <span>Đồng bộ thời gian thực</span>
-            </div>
-
-            {/* Refresh Data Button */}
-            <button
-              onClick={fetchAdminData}
-              disabled={loading}
-              className="flex h-9 items-center gap-1.5 rounded-xl border border-[#E8EEE9] bg-white px-3 text-xs font-semibold text-[#17231D] hover:bg-[#F7F9F6] active:scale-95 transition-all shadow-2xs"
-            >
-              <RefreshCw size={14} className={loading ? 'animate-spin text-[#16845B]' : 'text-[#758278]'} />
-              <span className="hidden sm:inline">Làm mới</span>
-            </button>
-
             {/* Notification Bell */}
             <button
               onClick={() => setActiveTab('notifications')}
@@ -2398,14 +2400,24 @@ const AdminDashboard = () => {
                   <h1 className="text-2xl font-bold tracking-tight text-[#17231D]">Trung tâm thông báo</h1>
                   <p className="text-xs text-[#758278]">Cảnh báo tồn kho, đánh giá người dùng và đơn hàng mới</p>
                 </div>
-                {unreadNotifications > 0 && (
-                  <button
-                    onClick={handleMarkAllNotificationsAsRead}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-[#E8EEE9] bg-white px-3.5 text-xs font-semibold text-[#16845B] hover:bg-[#E8F5EE] transition-colors shadow-2xs"
-                  >
-                    <Check size={14} /> Đánh dấu tất cả đã đọc
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  {unreadNotifications > 0 && (
+                    <button
+                      onClick={handleMarkAllNotificationsAsRead}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-[#E8EEE9] bg-white px-3.5 text-xs font-semibold text-[#16845B] hover:bg-[#E8F5EE] transition-colors shadow-2xs"
+                    >
+                      <Check size={14} /> Đánh dấu tất cả đã đọc
+                    </button>
+                  )}
+                  {notifications.length > 0 && (
+                    <button
+                      onClick={handleClearAllNotifications}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50/60 px-3.5 text-xs font-semibold text-rose-600 hover:bg-rose-100/80 transition-colors shadow-2xs"
+                    >
+                      <Trash2 size={14} /> Xóa tất cả
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="rounded-2xl border border-[#E8EEE9] bg-white shadow-xs overflow-hidden">
@@ -2459,9 +2471,19 @@ const AdminDashboard = () => {
                             </p>
                           )}
                         </div>
-                        {!notif.isRead && (
-                          <span className="h-2 w-2 rounded-full bg-[#16845B] mt-2 shrink-0" />
-                        )}
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteNotification(notif._id, e)}
+                            title="Xóa thông báo này"
+                            className="p-1.5 rounded-lg text-[#758278] hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                          {!notif.isRead && (
+                            <span className="h-2 w-2 rounded-full bg-[#16845B] shrink-0" />
+                          )}
+                        </div>
                       </div>
                     ))}
                   {notifications.length === 0 && (

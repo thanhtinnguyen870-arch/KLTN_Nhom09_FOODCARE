@@ -86,6 +86,7 @@ const Login = () => {
             auto_select: false,
             cancel_on_tap_outside: true,
             use_fedcm_for_prompt: false,
+            ux_mode: 'popup',
             callback: (res) => {
               if (window.__google_login_callback) {
                 window.__google_login_callback(res);
@@ -94,7 +95,7 @@ const Login = () => {
             error_callback: (err) => {
               console.warn('[Google Auth Error]:', err);
               if (err?.type === 'origin_mismatch') {
-                toast.error('Google Cloud chưa cho phép tên miền localhost:5173. Bạn có thể dùng nút Đăng nhập nhanh.');
+                toast.error('Google Cloud chưa cho phép tên miền localhost:5173. Bạn có thể dùng nút Đăng nhập nhanh bên dưới.');
               }
             },
           });

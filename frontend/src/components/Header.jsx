@@ -54,7 +54,7 @@ const Header = () => {
 
   const cartCount = cartItems.length;
   const favCount = favoriteIds.size;
-  const isAdmin = user?.role === 'admin' && user?.email === 'thanhtinnguyen870@gmail.com';
+  const isAdmin = user?.role === 'admin';
 
   return (
     <header

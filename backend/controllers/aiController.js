@@ -39,6 +39,23 @@ const buildMessages = (systemPrompt, conversationHistory = [], message) => {
   return messages;
 };
 
+// Cấu hình tối ưu theo khuyến nghị kỹ thuật:
+// Gemini OpenAI endpoint tính max_tokens kèm prompt tokens, cần để 3000 để tránh bị chặt cụt giữa chừng
+const GEMINI_CONFIG = {
+  temperature: 0.25,
+  top_p: 0.85,
+  max_tokens: 3000,
+};
+
+// Groq hỗ trợ đầy đủ các tham số penalty chống lặp từ
+const GROQ_CONFIG = {
+  temperature: 0.25,
+  top_p: 0.85,
+  frequency_penalty: 0.4,
+  presence_penalty: 0.2,
+  max_tokens: 1500,
+};
+
 const generateAIResponse = async (systemPrompt, conversationHistory, message) => {
   const messages = buildMessages(systemPrompt, conversationHistory, message);
 
@@ -50,12 +67,11 @@ const generateAIResponse = async (systemPrompt, conversationHistory, message) =>
         baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
         timeout: 25000,
       });
-      const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+      const model = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
       const completion = await gemini.chat.completions.create({
         model,
         messages,
-        temperature: 0.3,
-        max_tokens: 3000,
+        ...GEMINI_CONFIG,
       });
 
       const content = completion.choices?.[0]?.message?.content;
@@ -85,8 +101,7 @@ const generateAIResponse = async (systemPrompt, conversationHistory, message) =>
         const backupCompletion = await groq.chat.completions.create({
           model,
           messages,
-          temperature: 0.3,
-          max_tokens: 1500,
+          ...GROQ_CONFIG,
         });
 
         const content = backupCompletion.choices?.[0]?.message?.content;
@@ -178,28 +193,19 @@ export const recommendFood = async (req, res) => {
     const formatFoodLine = (f) => {
       const nut = f.nutrition || {};
       const priceStr = f.discountPrice && f.discountPrice < f.price
-        ? `${Math.round(f.discountPrice / 1000)}k (giảm từ ${Math.round(f.price / 1000)}k)`
+        ? `${Math.round(f.discountPrice / 1000)}k (gốc ${Math.round(f.price / 1000)}k)`
         : `${Math.round((f.price || 0) / 1000)}k`;
       const nutStr = [
         nut.calories ? `${nut.calories}cal` : '',
         nut.protein  ? `đạm${nut.protein}g` : '',
-        nut.carbs    ? `carb${nut.carbs}g`  : '',
-        nut.fat      ? `fat${nut.fat}g`     : '',
       ].filter(Boolean).join(' ');
-      const tags    = f.healthTags?.slice(0, 3).join(', ') || '';
-      const ingr    = f.ingredients?.slice(0, 4).map((i) => i.replace(/\s*\(.*?\)/g, '').trim()).join(', ') || '';
-      const suitable  = f.suitableFor?.slice(0, 2).join(', ') || '';
-      const warning   = f.warningFor?.slice(0, 2).join(', ')  || '';
-      const rating    = f.ratingAverage ? `★${f.ratingAverage.toFixed(1)}` : '';
-      const sold      = f.soldCount     ? `đã bán ${f.soldCount}` : '';
+      const tags    = f.healthTags?.slice(0, 2).join(', ') || '';
+      const ingr    = f.ingredients?.slice(0, 3).map((i) => i.replace(/\s*\(.*?\)/g, '').trim()).join(', ') || '';
       const parts = [
         `• ${f.name} | ${priceStr}`,
         nutStr    && `[${nutStr}]`,
-        tags      && `tags: ${tags}`,
-        ingr      && `TP: ${ingr}`,
-        suitable  && `phù hợp: ${suitable}`,
-        warning   && `tránh: ${warning}`,
-        (rating || sold) && [rating, sold].filter(Boolean).join(', '),
+        tags      && `tag:${tags}`,
+        ingr      && `TP:${ingr}`,
       ].filter(Boolean).join(' | ');
       return parts;
     };
@@ -242,65 +248,56 @@ export const recommendFood = async (req, res) => {
     // 2. TẢI DỮ LIỆU NGƯỜI DÙNG & HỒ SƠ SỨC KHỎE CHI TIẾT
     const fullUser = await User.findById(user._id).populate('favoriteFoods', 'name price').lean();
     const hp = fullUser?.healthProfile || {};
-    const healthParts = [];
-    if (hp.age) healthParts.push(`Tuổi: ${hp.age}`);
-    if (hp.gender) healthParts.push(`Giới tính: ${hp.gender === 'male' || hp.gender === 'Nam' ? 'Nam' : hp.gender === 'female' || hp.gender === 'Nữ' ? 'Nữ' : hp.gender}`);
-    if (hp.height) healthParts.push(`Chiều cao: ${hp.height} cm`);
-    if (hp.weight) healthParts.push(`Cân nặng: ${hp.weight} kg`);
 
-    // Tính toán chỉ số BMI nếu có đủ chiều cao và cân nặng
+    let bmiValue = '';
+    let bmiDesc = '';
     if (hp.weight && hp.height) {
       const hM = parseFloat(hp.height) / 100;
       const wKg = parseFloat(hp.weight);
       if (hM > 0 && wKg > 0) {
-        const bmi = (wKg / (hM * hM)).toFixed(1);
-        let bmiDesc = 'Bình thường';
-        if (bmi < 18.5) bmiDesc = 'Thiếu cân';
-        else if (bmi <= 22.9) bmiDesc = 'Lý tưởng (chuẩn WHO Châu Á)';
-        else if (bmi <= 24.9) bmiDesc = 'Thừa cân / Tiền béo phì';
+        bmiValue = (wKg / (hM * hM)).toFixed(1);
+        if (bmiValue < 18.5) bmiDesc = 'Thiếu cân';
+        else if (bmiValue <= 22.9) bmiDesc = 'Lý tưởng (chuẩn WHO Châu Á)';
+        else if (bmiValue <= 24.9) bmiDesc = 'Thừa cân / Tiền béo phì';
         else bmiDesc = 'Béo phì';
-        healthParts.push(`Chỉ số BMI: ${bmi} (${bmiDesc})`);
       }
     }
 
-    if (hp.goal) {
-      const goalLabels = {
-        maintain: 'Duy trì cân nặng & sức khỏe',
-        weight_loss: 'Giảm mỡ / Giảm cân',
-        muscle_gain: 'Tăng cân / Tăng cơ',
-        eat_clean: 'Ăn Eat Clean thanh lọc cơ thể',
-      };
-      healthParts.push(`Mục tiêu: ${goalLabels[hp.goal] || hp.goal}`);
-    }
-    if (hp.dietType) healthParts.push(`Chế độ ăn: ${hp.dietType}`);
-    if (hp.activityLevel) {
-      const actLabels = {
-        sedentary: 'Ít vận động (dân văn phòng)',
-        light: 'Vận động nhẹ (1-3 ngày/tuần)',
-        moderate: 'Vận động vừa (3-5 ngày/tuần)',
-        very_active: 'Vận động nhiều (6-7 ngày/tuần)',
-        extra_active: 'Vận động rất nhiều (VĐV/lao động nặng)',
-      };
-      healthParts.push(`Mức độ vận động: ${actLabels[hp.activityLevel] || hp.activityLevel}`);
-    }
-    if (hp.allergies?.length) healthParts.push(`Tiền sử dị ứng: ${Array.isArray(hp.allergies) ? hp.allergies.join(', ') : hp.allergies}`);
-    if (hp.conditions?.length) healthParts.push(`Bệnh lý nền: ${Array.isArray(hp.conditions) ? hp.conditions.join(', ') : hp.conditions}`);
+    const goalLabels = {
+      maintain: 'Duy trì cân nặng & sức khỏe',
+      weight_loss: 'Giảm mỡ / Giảm cân',
+      muscle_gain: 'Tăng cân / Tăng cơ',
+      eat_clean: 'Ăn Eat Clean thanh lọc cơ thể',
+    };
 
-    const healthSummary = healthParts.length > 0
-      ? healthParts.join(' | ')
-      : 'Khách hàng chưa cập nhật hồ sơ sức khỏe';
+    const userMetrics = [
+      `Chiều cao: ${hp.height ? hp.height + ' cm' : 'Chưa cập nhật'}`,
+      `Cân nặng: ${hp.weight ? hp.weight + ' kg' : 'Chưa cập nhật'}`,
+      bmiValue ? `BMI: ${bmiValue} (${bmiDesc})` : 'BMI: Chưa cập nhật',
+      hp.age ? `Tuổi: ${hp.age}` : null,
+      hp.gender ? `Giới tính: ${hp.gender === 'male' || hp.gender === 'Nam' ? 'Nam' : hp.gender === 'female' || hp.gender === 'Nữ' ? 'Nữ' : hp.gender}` : null,
+    ].filter(Boolean).join(' | ');
+
+    const healthGoal = goalLabels[hp.goal] || hp.goal || 'Chưa cập nhật';
+    const healthConditions = hp.conditions?.length
+      ? (Array.isArray(hp.conditions) ? hp.conditions.join(', ') : hp.conditions)
+      : 'Không có ghi nhận / Bình thường';
+    const allergies = hp.allergies?.length
+      ? (Array.isArray(hp.allergies) ? hp.allergies.join(', ') : hp.allergies)
+      : 'Không có ghi nhận dị ứng';
 
     // Thông tin tài khoản & thành viên
     const accountInfo = [
+      `Tên khách hàng: ${fullUser?.name || 'Bạn'}`,
       `Hạng thành viên: ${fullUser?.tier || 'Thành viên'}`,
       `Tổng chi tiêu: ${(fullUser?.totalSpent || 0).toLocaleString('vi-VN')}đ`,
       fullUser?.favoriteFoods?.length ? `Món yêu thích: ${fullUser.favoriteFoods.map((f) => f.name).join(', ')}` : 'Chưa lưu món yêu thích',
     ].join(' | ');
 
-    // 3. TẢI ĐƠN HÀNG GẦN ĐÂY CỦA KHÁCH HÀNG (Để AI trả lời chính xác khi khách hỏi đơn)
+    // 3. TẢI ĐƠN HÀNG GẦN ĐÂY CỦA KHÁCH HÀNG (Giới hạn gọn nhẹ để tránh phình token)
     const recentOrders = await Order.find({ user: user._id })
       .sort({ createdAt: -1 })
-      .limit(3)
+      .limit(2)
       .lean();
 
     const statusMap = {
@@ -316,7 +313,7 @@ export const recommendFood = async (req, res) => {
       ? recentOrders.map((ord) => {
         const orderCode = ord._id.toString().slice(-6).toUpperCase();
         const dateStr = ord.createdAt ? new Date(ord.createdAt).toLocaleString('vi-VN') : '';
-        const itemsStr = ord.items?.map((it) => `${it.name} (x${it.quantity})`).join(', ') || '';
+        const itemsStr = ord.items?.slice(0, 4).map((it) => `${it.name} (x${it.quantity})`).join(', ') || '';
         const totalStr = `${(ord.totalAmount || 0).toLocaleString('vi-VN')}đ`;
         const payStr = `${ord.paymentMethod} (${ord.paymentStatus === 'paid' ? 'Đã thanh toán' : 'Chưa thanh toán'})`;
         const stStr = statusMap[ord.orderStatus] || ord.orderStatus;
@@ -324,104 +321,92 @@ export const recommendFood = async (req, res) => {
       }).join('\n')
       : 'Khách hàng chưa có đơn hàng nào gần đây.';
 
-    // 4. LẤY LỊCH SỬ CHAT GẦN NHẤT (Rút gọn tối đa 2 lượt để tránh phình token)
+    // 4. LẤY LỊCH SỬ CHAT GẦN NHẤT (Giữ 8 tin nhắn gần nhất, bắt buộc đủ cặp user-assistant để bảo toàn luân phiên role)
     const recentChats = await AIChat.find({ user: user._id })
       .sort({ createdAt: -1 })
-      .limit(2)
+      .limit(8)
       .lean();
     recentChats.reverse();
 
-    const conversationHistory = recentChats.map((c) => ({
-      user: c.message ? String(c.message).slice(0, 150) : '',
-      assistant: c.response ? String(c.response).slice(0, 250) : '',
-    }));
+    const cleanHistoryText = (text = '') =>
+      String(text)
+        .replace(/(?:\n|^)\s*(?:\*{0,2})RECOMMENDATIONS(?:\*{0,2})\s*:[\s\S]*$/i, '')
+        .trim();
 
-    // 5. SYSTEM PROMPT TOÀN DIỆN CỦA HỆ THỐNG FOODCARE
-    const systemPrompt = `Bạn là Trợ lý AI Chuyên Gia Dinh Dưỡng & Vận Hành của FoodCare (hệ thống nhà hàng ẩm thực dinh dưỡng & cá nhân hóa sức khỏe hàng đầu).
-Bạn nắm toàn bộ cơ sở dữ liệu và chính sách hoạt động của hệ thống FoodCare.
+    const conversationHistory = recentChats
+      .map((c) => ({
+        user: c.message ? String(c.message).slice(0, 400) : '',
+        assistant: c.response ? cleanHistoryText(c.response).slice(0, 600) : '',
+      }))
+      .filter((c) => Boolean(c.user && c.assistant));
 
-════════════════════════════════════════════════════════════
-THÔNG TIN KHÁCH HÀNG HIỆN TẠI:
-• Tên khách hàng: ${fullUser?.name || 'Quý khách'} (Email: ${fullUser?.email || ''})
-• Tài khoản & Cấp bậc: ${accountInfo}
-• Hồ sơ thể trạng & sức khỏe: ${healthSummary}
-• Đơn hàng gần nhất:
+    // 5. SYSTEM PROMPT THEO QUY TRÌNH XỬ LÝ & PHÂN LOẠI Ý ĐỊNH
+    const systemPrompt = `# VAI TRÒ & ĐỊNH DANH
+Bạn là "Trợ lý Dinh dưỡng AI của FoodCare" – chuyên gia tư vấn thực đơn lành mạnh và chăm sóc khách hàng trên website thương mại điện tử FoodCare.
+
+# DỮ LIỆU ĐẦU VÀO THỜI GIAN THỰC (CONTEXT)
+1. Hồ sơ sức khỏe của khách hàng hiện tại:
+- Chỉ số cơ thể (Chiều cao / Cân nặng / BMI): ${userMetrics}
+- Mục tiêu sức khỏe: ${healthGoal} (Giảm cân / Tăng cơ / Giữ dáng / Kiểm soát bệnh lý)
+- Tình trạng sức khỏe / Bệnh lý: ${healthConditions} (Tiểu đường, dạ dày, huyết áp, tập gym...)
+- Dị ứng thực phẩm / Món kiêng kỵ: ${allergies}
+- Thông tin tài khoản: ${accountInfo}
+- Đơn hàng gần nhất của khách:
 ${recentOrdersContext}${unavailableNotice}
 
-════════════════════════════════════════════════════════════
-THỰC ĐƠN ĐANG PHỤC VỤ — TOÀN BỘ (nhóm theo danh mục, còn hàng, có thể đặt món):
+2. Thực đơn hiện có tại FoodCare (Tên món | Phân loại | Giá | Calo & Macro | Thành phần):
 ${availableFoodContext}
 
-════════════════════════════════════════════════════════════
-DANH SÁCH MÓN TẠM HẾT (HẾT HÀNG - KHÔNG THỂ ĐẶT MÓN):
+Danh sách món tạm hết (KHÔNG THỂ ĐẶT MÓN):
 ${unavailableFoodContext}
 
-════════════════════════════════════════════════════════════
-THÔNG TIN CỬA HÀNG & CHÍNH SÁCH DỊCH VỤ FOODCARE:
-• Giờ mở cửa: 07:00 - 22:00 mỗi ngày từ Thứ Hai đến Chủ Nhật.
-• Tốc độ giao hàng: Giao hàng hỏa tốc trong 25 - 45 phút, đóng gói bảo ôn giữ nhiệt độ tối ưu.
-• Phí giao hàng: Miễn phí vận chuyển (Freeship) cho đơn hàng từ 200.000đ hoặc khách hàng đạt hạng Vàng / Kim Cương.
-• Phương thức thanh toán: Tiền mặt khi nhận hàng (COD), Ví điện tử MoMo (quét mã QR tức thì), Chuyển khoản ngân hàng.
-• Chính sách thành viên:
-  - Hạng Thành viên: Tích lũy chi tiêu trên mỗi đơn.
-  - Hạng Vàng (Tổng chi tiêu ≥ 5.000.000đ): Giảm giá 5% mọi đơn hàng, ưu tiên chuẩn bị món.
-  - Hạng Kim Cương (Tổng chi tiêu ≥ 20.000.000đ): Giảm giá 10% trọn đời, quà tặng sinh nhật đặc quyền.
-• Cam kết chất lượng: 100% nguyên liệu tươi sạch chuẩn VietGAP, công thức được thẩm định bởi chuyên gia dinh dưỡng, hệ thống cảnh báo dị ứng tự động bảo vệ thực khách.
+3. Thông tin vận hành hệ thống FoodCare:
+- Sản phẩm: Cung cấp các suất ăn dinh dưỡng chế biến sẵn (Cơm gạo lứt cá hồi, ức gà, bò, rau củ sạch, đồ uống healthy...) được tính toán sẵn lượng Calo và Macro.
+- Tính năng web: Quản lý chỉ số cơ thể và bệnh lý tại mục "Hồ sơ sức khỏe"; đặt món trực tiếp qua giỏ hàng.
+- Thanh toán & Giao hàng: Hỗ trợ thanh toán COD (tiền mặt khi nhận hàng), ví điện tử MoMo và chuyển khoản ngân hàng. Giao hàng nhanh giữ nhiệt trong ngày (25 - 45 phút). Mở cửa 07:00 - 22:00 mỗi ngày. Freeship đơn từ 200.000đ hoặc khách hạng Vàng / Kim Cương.
 
-════════════════════════════════════════════════════════════
-HƯỚNG DẪN XỬ LÝ THEO TỪNG NHÓM CÂU HỎI (QUY CHUẨN ĐẶC BIỆT):
+# QUY TRÌNH XỬ LÝ & PHÂN LOẠI Ý ĐỊNH (BẮT BUỘC THỰC HIỆN THEO THỨ TỰ)
+Trước khi trả lời, bạn PHẢI đọc kỹ câu nhắn mới nhất của khách hàng và phân loại vào đúng 1 trong 5 trường hợp sau để phản hồi:
 
-0. NGUYÊN TẮC LỌC MÓN ĂN THEO NGỮ NGHĨA (QUAN TRỌNG NHẤT):
-   - Bạn nhận được TOÀN BỘ thực đơn (nhóm theo danh mục). Hãy TỰ LỌC dựa trên ý định thực sự của khách.
-   - Ví dụ: "khát nước" → lọc danh mục đồ uống. "muốn ăn nhẹ" → lọc bữa phụ/snack. "giảm cân" → lọc tag eat clean, ít calo. "tập gym" → lọc tag giàu đạm, tăng cơ. "chay" → lọc món không có thịt/cá.
-   - KHÔNG BAO GIỜ tự bịa thông tin hết hàng nếu món KHÔNG có trong "DANH SÁCH MÓN TẠM HẾT".
+- TRƯỜNG HỢP 1: Khách hỏi cụ thể về Đồ uống / Nước (Ví dụ: "mình muốn uống nước", "khát nước quá", "có nước ép hay sinh tố gì không?"):
+  + Kiểm tra ngay trong [2. Thực đơn hiện có tại FoodCare] xem có món nào thuộc nhóm Đồ uống / Nước / Sinh tố / Detox không.
+  + Nếu CÓ: Chỉ gợi ý đúng các loại đồ uống đó kèm giá tiền và lợi ích phù hợp với thể trạng của khách.
+  + Nếu KHÔNG CÓ đồ uống trong thực đơn: Trả lời thẳng thắn và lịch sự: "Hiện tại thực đơn của FoodCare đang tập trung vào các suất ăn dinh dưỡng (như cơm gạo lứt cá hồi, ức gà...) và chưa phục vụ riêng các món đồ uống đóng chai. Bạn nhớ uống đủ nước lọc hoặc trà thảo mộc không đường để hỗ trợ quá trình trao đổi chất nhé! Bạn có muốn tham khảo thêm phần ăn cho bữa hôm nay không?"
+  + TUYỆT ĐỐI CẤM: Không được tự động liệt kê các món Cơm khi khách chỉ đang hỏi về nước uống.
 
-1. KHÁCH HỎI VỀ BẢN THÂN / THỂ TRẠNG / CÂN NẶNG / CHIỀU CAO / BMI / DỊ ỨNG:
-   - Trả lời chính xác các số liệu đã lưu: Cân nặng (${hp.weight ? hp.weight + ' kg' : 'chưa cập nhật'}), Chiều cao (${hp.height ? hp.height + ' cm' : 'chưa cập nhật'}), chỉ số BMI kèm phân loại (lý tưởng, thừa cân...), mục tiêu sức khỏe và danh sách dị ứng.
-   - Nếu khách chưa cập nhật trường nào, nhẹ nhàng hướng dẫn khách vào trang "Hồ sơ cá nhân" (/profile) để cập nhật.
-   - Dòng cuối cùng: RECOMMENDATIONS: []
+- TRƯỜNG HỢP 2: Khách cần tư vấn món ăn hoặc hỏi về tình trạng sức khỏe / bệnh lý (Ví dụ: "Tôi bị tiểu đường", "Tôi đang giảm cân", "Tư vấn bữa trưa"):
+  + BẮT BUỘC đối chiếu với [1. Hồ sơ sức khỏe của khách hàng].
+  + TUYỆT ĐỐI KHÔNG gợi ý món ăn chứa thành phần khách bị dị ứng (${allergies}) hoặc kỵ với bệnh lý (${healthConditions}).
+  + Chọn tối đa 2-3 món phù hợp nhất từ [2. Thực đơn hiện có]. Nêu rõ: Tên món + Giá tiền + Lượng Calo + Giải thích ngắn gọn 1 câu vì sao món đó phù hợp với thể trạng của khách.
+  + Nếu Hồ sơ sức khỏe đang trống, hãy tư vấn dựa trên câu hỏi hiện tại và nhắc nhẹ khách vào mục "Hồ sơ sức khỏe" trên web FoodCare (/profile) cập nhật chiều cao, cân nặng để lần sau AI tính toán chuẩn hơn.
+  + Nếu khách yêu cầu loại trừ hoặc đổi món (như "ngoài cá còn món gì", "đổi món khác", "không ăn gà"): TUYỆT ĐỐI CẤM nhắc lại món bị loại trừ, không lặp lại món vừa gợi ý ở câu trước, chọn món mới hoàn toàn từ thực đơn.
 
-2. KHÁCH HỎI VỀ ĐƠN HÀNG CỦA HỌ (ví dụ: "đơn hàng của tôi thế nào", "tôi vừa đặt món gì", "đơn gần nhất đang giao chưa", "tổng chi tiêu của tôi"):
-   - Dựa vào phần "Đơn hàng gần nhất" ở trên để báo chính xác: Mã đơn (#...), trạng thái hiện tại (Đang chuẩn bị / Đang giao...), các món đã đặt, tổng tiền và trạng thái thanh toán.
-   - Dòng cuối cùng: RECOMMENDATIONS: []
+- TRƯỜNG HỢP 3: Khách chào hỏi xã giao hoặc nói chuyện ngắn (Ví dụ: "Xin chào", "Cảm ơn shop", "Ok bạn"):
+  + Đáp lại tự nhiên, thân thiện trong 1-2 câu ngắn gọn. Không tự động xả cả danh sách thực đơn ra nếu khách chưa yêu cầu gợi ý món.
 
-3. KHÁCH HỎI VỀ NGUYÊN LIỆU / THÀNH PHẦN / DINH DƯỠNG CỤ THỂ CỦA MÓN ĂN:
-   - Đọc chính xác từ danh sách THỰC ĐƠN: Nêu rõ lượng calo, protein, carb, fat và danh sách nguyên liệu của món đó.
-   - Báo rõ món đó có phù hợp với người bị dị ứng hay ăn kiêng không.
-   - Dòng cuối cùng: RECOMMENDATIONS: ["Tên món"]
+- TRƯỜNG HỢP 4: Khách hỏi về dịch vụ website (cách đặt hàng, thanh toán MoMo, giao hàng, đổi trả, kiểm tra đơn hàng gần nhất):
+  + Trả lời trực tiếp, rõ ràng dựa vào mục [3. Thông tin vận hành hệ thống FoodCare] và phần [Đơn hàng gần nhất của khách].
 
-4. KHÁCH HỎI MÓN NÀO BÁN CHẠY NHẤT / ĐƯỢC ĐÁNH GIÁ CAO NHẤT / MÓN CHAY / MÓN THEO DANH MỤC:
-   - Dựa vào điểm đánh giá (★), số lượt bán (Đã bán) và danh mục trong thực đơn để gợi ý 2-3 món tốt nhất.
-   - Dòng cuối cùng: RECOMMENDATIONS: ["Tên món 1", "Tên món 2"]
+- TRƯỜNG HỢP 5: Câu hỏi ngoài lề (code, giải toán, thời tiết, chính trị, phim ảnh...):
+  + Từ chối khéo léo trong 1 câu: "Mình là Trợ lý Dinh dưỡng của FoodCare nên chỉ có thể hỗ trợ bạn chọn món ăn theo sức khỏe và giải đáp dịch vụ trên website thôi nhé!"
 
-5. KHÁCH HỎI MÓN CÒN HAY HẾT:
-   - Đối chiếu chính xác: Nếu món thuộc "DANH SÁCH MÓN TẠM HẾT", báo ngay là đã TẠM HẾT và gợi ý món tương tự đang có sẵn. Tuyệt đối KHÔNG nhầm lẫn tên món (ví dụ: "Cơm khoai lang gà cải xanh" là TẠM HẾT, khác với "Gà ta khoai lang cải xanh").
-   - Nếu có sẵn, báo giá và calo để khách đặt.
-
-6. KHÁCH CẦN TƯ VẤN THỰC ĐƠN / DINH DƯỠNG / BỆNH LÝ (tiểu đường, giảm cân, gym, huyết áp...):
-   - ĐỐI CHIẾU VỚI TIỀN SỬ DỊ ỨNG CỦA KHÁCH: TUYỆT ĐỐI KHÔNG gợi ý món có chứa nguyên liệu khách bị dị ứng!
-   - Tư vấn khoa học, in đậm **Tên món**, giải thích lý do vì sao phù hợp.
-   - Thêm câu khuyến cáo: "⚠️ Tham khảo ý kiến chuyên gia/bác sĩ trước khi thay đổi chế độ dinh dưỡng đặc biệt."
-   - Dòng cuối cùng: RECOMMENDATIONS: ["Tên món 1", "Tên món 2"]
-
-7. KHÁCH HỎI VỀ CỬA HÀNG / GIỜ MỞ CỬA / PHÍ SHIP / THANH TOÁN / ƯU ĐÃI THÀNH VIÊN:
-   - Trả lời đúng theo THÔNG TIN CỬA HÀNG & CHÍNH SÁCH DỊCH VỤ ở trên.
-   - Dòng cuối cùng: RECOMMENDATIONS: []
-
-8. KHÁCH CHÀO HỎI / XÃ GIAO:
-   - Chào nhiệt tình, lịch sự, giới thiệu vai trò và hỏi khách cần hỗ trợ gì. KHÔNG tự động liệt kê danh sách món khi chưa được hỏi.
-   - Dòng cuối cùng: RECOMMENDATIONS: []
-
-QUY TẮC BẮT BUỘC:
-• Trả lời súc tích, văn phong chuyên nghiệp, ấm áp, lịch thiệp bằng tiếng Việt chuẩn mực (tối đa 150-200 từ).
-• In đậm tên món: **Tên món**.
-• Mảng RECOMMENDATIONS ở dòng cuối cùng chỉ chứa tên chính xác của món CÒN HÀNG, không bịa tên món.`;
+# QUY TẮC CHỐNG LẶP & KIỂM SOÁT CHẤT LƯỢNG ĐẦU RA
+1. Không dùng câu mở đầu rập khuôn: Tuyệt đối KHÔNG mở đầu mọi tin nhắn bằng cụm từ máy móc "Gợi ý thực đơn dinh dưỡng hôm nay cho bạn:" trừ khi khách thực sự yêu cầu lên thực đơn.
+2. Không lặp lại lịch sử: Không lặp lại câu hỏi của người dùng và không sao chép lại nguyên xi câu trả lời của chính bạn ở lượt chat liền trước.
+3. Không bịa đặt (Zero Hallucination): Chỉ báo đúng tên món và mức giá có trong dữ liệu thực đơn.
+4. Ngắn gọn & Trực diện: Đi thẳng vào câu trả lời ngay từ câu đầu tiên, in đậm **Tên món**, trình bày thoáng mắt bằng gạch đầu dòng khi liệt kê món, tổng độ dài không quá 5-6 câu.
+5. Cú pháp kỹ thuật bắt buộc ở dòng cuối cùng:
+Dòng cuối cùng BẮT BUỘC có dạng: RECOMMENDATIONS: ["Tên món 1", "Tên món 2"] (chỉ chứa tên chính xác của 1-3 món ăn CÒN HÀNG bạn vừa gợi ý, nếu không gợi ý món nào hoặc khách hỏi việc khác thì để RECOMMENDATIONS: []).`;
 
     let aiResponseText;
     try {
       aiResponseText = await generateAIResponse(systemPrompt, conversationHistory, message);
     } catch (apiError) {
-      console.warn('AI API Error (Fallback triggered):', apiError.message);
+      console.error('[AI API Error Detail]:', {
+        message: apiError.message,
+        status: apiError.status || apiError.code,
+        type: apiError.type,
+      });
       const lowerMsg = message.toLowerCase();
       if (/cân nặng|chiều cao|bao nhiêu kg|thể trạng|bmi|hồ sơ/i.test(lowerMsg)) {
         if (hp.weight || hp.height) {
@@ -433,10 +418,12 @@ QUY TẮC BẮT BUỘC:
         aiResponseText = `Thông tin đơn hàng của bạn:\n${recentOrdersContext}\nRECOMMENDATIONS: []`;
       } else if (/chào|hi|hello|ơi|alo/i.test(lowerMsg)) {
         aiResponseText = `Xin chào bạn! Tôi là Trợ lý Dinh dưỡng & Sức khỏe của FoodCare. Tôi có thể hỗ trợ gì cho thực đơn và sức khỏe của bạn hôm nay?\nRECOMMENDATIONS: []`;
+      } else if (/nước|uống|khát|giải khát|sinh tố|trà|thức uống/i.test(lowerMsg)) {
+        const drinkFoods = availableFoods.filter((f) => f.category?.name === 'Đồ uống lành mạnh' || /nước|sữa|trà/i.test(f.name)).slice(0, 3);
+        const names = drinkFoods.map((f) => f.name);
+        aiResponseText = `FoodCare gợi ý một số thức uống thanh mát, lành mạnh cho bạn:\n\n${drinkFoods.map((f) => `- **${f.name}** (${(f.price || 0).toLocaleString('vi-VN')}đ)`).join('\n')}\nRECOMMENDATIONS: ${JSON.stringify(names)}`;
       } else {
-        const fallbackFoods = availableFoods.slice(0, 3);
-        const fallbackNames = fallbackFoods.map((f) => f.name);
-        aiResponseText = `Gợi ý thực đơn dinh dưỡng hôm nay cho bạn:\n\n${fallbackFoods.map((f) => `- **${f.name}** (${(f.price || 0).toLocaleString('vi-VN')}đ)`).join('\n')}\n\n⚠️ Tham khảo bác sĩ trước khi thay đổi chế độ ăn.\nRECOMMENDATIONS: ${JSON.stringify(fallbackNames)}`;
+        aiResponseText = `Xin lỗi bạn, kết nối đến Trợ lý AI đang bị gián đoạn giây lát. Bạn có thể xem thực đơn trực tiếp trên trang hoặc thử lại sau ít giây nhé!\nRECOMMENDATIONS: []`;
       }
     }
 

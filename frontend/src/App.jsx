@@ -1,8 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import Header from './components/Header';
 import Footer from './components/Footer';
 import ScrollToTop from './components/ScrollToTop';
@@ -20,6 +19,7 @@ const Contact       = lazy(() => import('./pages/Contact'));
 const Cart          = lazy(() => import('./pages/Cart'));
 const Checkout      = lazy(() => import('./pages/Checkout'));
 const MomoReturn    = lazy(() => import('./pages/MomoReturn'));
+const VnpayReturn   = lazy(() => import('./pages/VnpayReturn'));
 const Profile       = lazy(() => import('./pages/Profile'));
 const Favorites     = lazy(() => import('./pages/Favorites'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
@@ -38,7 +38,7 @@ const PageSkeleton = () => (
   </div>
 );
 
-// Route guard: chỉ duy nhất tài khoản admin (thanhtinnguyen870@gmail.com) mới được vào
+// Route guard: chỉ cho phép tài khoản có role 'admin' vào
 const AdminRoute = ({ children }) => {
   const { user } = useAuth();
 
@@ -53,7 +53,7 @@ const AdminRoute = ({ children }) => {
   })();
 
   if (!currentUser) return <Navigate to="/login" state={{ from: '/admin' }} replace />;
-  if (currentUser.role !== 'admin' || currentUser.email !== 'thanhtinnguyen870@gmail.com') return <Navigate to="/" replace />;
+  if (currentUser.role !== 'admin') return <Navigate to="/" replace />;
   return children;
 };
 
@@ -79,6 +79,7 @@ function AppShell() {
             <Route path="/cart"                  element={<Cart />} />
             <Route path="/checkout"              element={<Checkout />} />
             <Route path="/payment/momo-return"   element={<MomoReturn />} />
+            <Route path="/payment/vnpay-return"  element={<VnpayReturn />} />
             <Route path="/my-orders"             element={<Navigate to="/profile?tab=tracking" replace />} />
             <Route path="/profile"               element={<Profile />} />
             <Route path="/favorites"             element={<Favorites />} />

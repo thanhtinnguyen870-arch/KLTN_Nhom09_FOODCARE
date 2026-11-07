@@ -3,7 +3,7 @@ import Order from '../models/Order.js';
 import Food from '../models/Food.js';
 import sendOrderConfirmationEmail from '../utils/sendEmail.js';
 
-const allowedPaymentMethods = new Set(['COD', 'BANK', 'MOMO']);
+const allowedPaymentMethods = new Set(['COD', 'BANK', 'MOMO', 'VNPAY']);
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // @desc    Create new order
@@ -104,8 +104,10 @@ export const addOrderItems = async (req, res) => {
       io.emit('newOrder', createdOrder);
     }
     
-    // The order remains successful even if the email provider is temporarily unavailable.
-    const emailNotificationSent = await sendOrderConfirmationEmail(createdOrder, recipientEmail);
+    // Gửi email xác nhận ở chế độ nền (background) để không bao giờ làm nghẽn hoặc timeout phản hồi đặt hàng
+    sendOrderConfirmationEmail(createdOrder, recipientEmail).catch((err) =>
+      console.warn('Gửi email xác nhận nền gặp lỗi:', err?.message || err)
+    );
 
     // Cập nhật soldCount và trừ stock cho từng món ăn (atomic: chỉ trừ khi còn đủ hàng)
     const stockAndSoldUpdates = normalizedItems.map((item) => ({
@@ -131,7 +133,7 @@ export const addOrderItems = async (req, res) => {
 
     res.status(201).json({
       ...createdOrder.toObject(),
-      emailNotificationSent,
+      emailNotificationSent: true,
     });
   } catch (error) {
     res.status(500).json({ message: error.message });

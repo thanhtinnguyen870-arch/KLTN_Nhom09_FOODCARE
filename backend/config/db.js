@@ -7,6 +7,19 @@ const connectDB = async () => {
       autoIndex: true,
     });
     console.log(`MongoDB Connected: ${conn.connection.host}`);
+
+    mongoose.connection.on('disconnected', () => {
+      console.warn('MongoDB disconnected. Attempting to reconnect...');
+    });
+
+    mongoose.connection.on('reconnected', () => {
+      console.log('MongoDB reconnected successfully.');
+    });
+
+    mongoose.connection.on('error', (err) => {
+      console.error(`MongoDB runtime error: ${err.message}`);
+    });
+
     return conn;
   } catch (error) {
     console.error(`MongoDB Connection Error: ${error.message}`);

@@ -1,6 +1,8 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'thanhtinnguyen870@gmail.com';
+
 const protect = async (req, res, next) => {
   const authHeader = req.headers.authorization;
 
@@ -28,7 +30,7 @@ const protect = async (req, res, next) => {
 };
 
 const admin = (req, res, next) => {
-  if (req.user && req.user.role === 'admin' && req.user.email === 'thanhtinnguyen870@gmail.com') {
+  if (req.user && req.user.role === 'admin' && req.user.email === ADMIN_EMAIL) {
     next();
   } else {
     res.status(403).json({ message: 'Not authorized as an admin' });

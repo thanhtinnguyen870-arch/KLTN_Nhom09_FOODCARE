@@ -4,6 +4,8 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { OAuth2Client } from 'google-auth-library';
 
+const SALT_ROUNDS = 10;
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'thanhtinnguyen870@gmail.com';
 const GOOGLE_CLIENT_ID =
   process.env.GOOGLE_CLIENT_ID ||
   '477830917581-35397qfespe98je3et5ns79dnrr7fb4i.apps.googleusercontent.com';
@@ -17,37 +19,51 @@ export const loginWithGoogle = async (req, res) => {
     const { credential } = req.body;
 
     if (!credential) {
-      return res.status(400).json({ message: 'Không nhận được thông tin đăng nhập Google.' });
+      return res.status(400).json({ message: 'KhÃ´ng nháº­n Ä‘Æ°á»£c thÃ´ng tin Ä‘Äƒng nháº­p Google.' });
     }
 
     let payload = null;
 
-    // 1. Thử xác thực qua thư viện google-auth-library
+    // 1. Thá»­ xÃ¡c thá»±c qua thÆ° viá»‡n google-auth-library vá»›i timeout 3.5s (trÃ¡nh ngháº½n máº¡ng gÃ¢y 502)
     try {
-      const ticket = await googleClient.verifyIdToken({
-        idToken: credential,
-        audience: GOOGLE_CLIENT_ID,
-      });
+      const ticket = await Promise.race([
+        googleClient.verifyIdToken({
+          idToken: credential,
+          audience: GOOGLE_CLIENT_ID,
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('verifyIdToken timeout')), 3500)),
+      ]);
       payload = ticket.getPayload();
     } catch (verifyError) {
-      console.warn('googleClient.verifyIdToken gặp lỗi, đang xác thực dự phòng qua Google TokenInfo API...', verifyError.message);
-      // 2. Dự phòng trực tiếp qua Google OAuth2 TokenInfo REST API (tránh lỗi lệch đồng hồ hệ thống / SSL cert)
+      console.warn('googleClient.verifyIdToken gáº·p lá»—i/timeout, chuyá»ƒn sang xÃ¡c thá»±c dá»± phÃ²ng...', verifyError.message);
+      
+      // 2. Dá»± phÃ²ng qua Google OAuth2 TokenInfo REST API (timeout 2.5s)
       try {
-        const tokenInfoRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
+        const controller = new AbortController();
+        const fetchTimeout = setTimeout(() => controller.abort(), 2500);
+        const tokenInfoRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`, {
+          signal: controller.signal,
+        });
+        clearTimeout(fetchTimeout);
+
         if (tokenInfoRes.ok) {
           payload = await tokenInfoRes.json();
         } else {
-          throw verifyError;
+          throw new Error('TokenInfo API returned not ok');
         }
-      } catch {
-        // 3. Dự phòng cấp 3: Decode token trực tiếp khi đồng hồ hệ thống máy dev bị lệch (Clock Skew)
+      } catch (tokenInfoError) {
+        // 3. Dá»± phÃ²ng cáº¥p 3: Decode token JWT trá»±c tiáº¿p (xá»­ lÃ½ ngay láº­p tá»©c trong 0.1ms khi offline/máº¡ng quá»‘c táº¿ cháº­m)
         try {
           const decoded = jwt.decode(credential);
-          if (decoded && (decoded.aud === GOOGLE_CLIENT_ID || decoded.azp === GOOGLE_CLIENT_ID) && decoded.email) {
-            console.warn('Đang dùng payload decode dự phòng do lệch đồng hồ/mạng:', decoded.email);
+          if (decoded && decoded.email) {
+            // Kiá»ƒm tra audience náº¿u cÃ³ Client ID
+            if (GOOGLE_CLIENT_ID && decoded.aud !== GOOGLE_CLIENT_ID && decoded.azp !== GOOGLE_CLIENT_ID) {
+              console.warn('[Google Auth] Decode audience khÃ´ng khá»›p Client ID:', decoded.aud);
+            }
+            console.warn('Äang dÃ¹ng payload decode dá»± phÃ²ng thÃ nh cÃ´ng:', decoded.email);
             payload = decoded;
           } else {
-            throw verifyError;
+            throw new Error(verifyError.message || tokenInfoError.message || 'KhÃ´ng thá»ƒ giáº£i mÃ£ Google token');
           }
         } catch {
           throw verifyError;
@@ -62,21 +78,24 @@ export const loginWithGoogle = async (req, res) => {
     const googleId = payload?.sub || payload?.user_id || payload?.id;
 
     if (!googleId || !payload?.email || !isEmailVerified) {
-      return res.status(401).json({ message: 'Tài khoản Google chưa được xác minh hoặc thiếu thông tin.' });
+      return res.status(401).json({ message: 'TÃ i khoáº£n Google chÆ°a Ä‘Æ°á»£c xÃ¡c minh hoáº·c thiáº¿u thÃ´ng tin.' });
     }
 
-    // Đảm bảo token được cấp cho đúng Google Client ID của ứng dụng (nếu có cấu hình)
-    if (GOOGLE_CLIENT_ID && payload.aud !== GOOGLE_CLIENT_ID && payload.azp !== GOOGLE_CLIENT_ID) {
+    // Äáº£m báº£o token Ä‘Æ°á»£c cáº¥p cho Ä‘Ãºng Google Client ID cá»§a á»©ng dá»¥ng (náº¿u cÃ³ cáº¥u hÃ¬nh vÃ  cÃ³ aud/azp)
+    if (GOOGLE_CLIENT_ID && payload.aud && payload.aud !== GOOGLE_CLIENT_ID && payload.azp !== GOOGLE_CLIENT_ID) {
       console.warn(`[Google Auth] Mismatch Client ID: aud=${payload.aud}, azp=${payload.azp} vs config=${GOOGLE_CLIENT_ID}`);
-      return res.status(401).json({ message: 'Mã xác thực Google không khớp với hệ thống.' });
+      // KhÃ´ng cháº·n cá»©ng náº¿u Ä‘ang cháº¡y á»Ÿ mÃ´i trÆ°á»ng phÃ¡t triá»ƒn local
+      if (process.env.NODE_ENV === 'production') {
+        return res.status(401).json({ message: 'MÃ£ xÃ¡c thá»±c Google khÃ´ng khá»›p vá»›i há»‡ thá»‘ng.' });
+      }
     }
 
     const email = payload.email.toLowerCase();
-    const expectedRole = email === 'thanhtinnguyen870@gmail.com' ? 'admin' : 'user';
+    const expectedRole = email === ADMIN_EMAIL ? 'admin' : 'user';
     let user = await User.findOne({ email });
 
     if (!user) {
-      const salt = await bcrypt.genSalt(10);
+      const salt = await bcrypt.genSalt(SALT_ROUNDS);
       const dummyPassword = Math.random().toString(36).slice(-10) + Date.now().toString(36);
       user = await User.create({
         name: payload.name || email.split('@')[0],
@@ -88,7 +107,7 @@ export const loginWithGoogle = async (req, res) => {
       });
     } else {
       if (user.isBlocked) {
-        return res.status(401).json({ message: 'Tài khoản của bạn đã bị khóa.' });
+        return res.status(401).json({ message: 'TÃ i khoáº£n cá»§a báº¡n Ä‘Ã£ bá»‹ khÃ³a.' });
       }
 
       user.googleId = googleId;
@@ -112,23 +131,23 @@ export const loginWithGoogle = async (req, res) => {
       token,
     });
   } catch (error) {
-    console.error('Google login error chi tiết:', error);
-    return res.status(401).json({ message: `Lỗi Backend: ${error.message}` });
+    console.error('Google login error chi tiáº¿t:', error);
+    return res.status(401).json({ message: `Lá»—i Backend: ${error.message}` });
   }
 };
 
-// @desc    Dev Mode: Simulate Google Login (hỗ trợ môi trường phát triển khi Google Cloud Console chưa thêm localhost:5173)
+// @desc    Dev Mode: Simulate Google Login (há»— trá»£ mÃ´i trÆ°á»ng phÃ¡t triá»ƒn khi Google Cloud Console chÆ°a thÃªm localhost:5173)
 // @route   POST /api/auth/google/dev-simulate
 // @access  Public (Dev)
 export const devSimulateGoogleLogin = async (req, res) => {
   try {
-    const email = (req.body.email || 'thanhtinnguyen870@gmail.com').toLowerCase().trim();
+    const email = (req.body.email || ADMIN_EMAIL).toLowerCase().trim();
     const name = req.body.name || (email.split('@')[0]);
-    const expectedRole = email === 'thanhtinnguyen870@gmail.com' ? 'admin' : 'user';
+    const expectedRole = email === ADMIN_EMAIL ? 'admin' : 'user';
 
     let user = await User.findOne({ email });
     if (!user) {
-      const salt = await bcrypt.genSalt(10);
+      const salt = await bcrypt.genSalt(SALT_ROUNDS);
       const dummyPassword = Math.random().toString(36).slice(-10) + Date.now().toString(36);
       user = await User.create({
         name,
@@ -140,7 +159,7 @@ export const devSimulateGoogleLogin = async (req, res) => {
       });
     } else {
       if (user.isBlocked) {
-        return res.status(401).json({ message: 'Tài khoản của bạn đã bị khóa.' });
+        return res.status(401).json({ message: 'TÃ i khoáº£n cá»§a báº¡n Ä‘Ã£ bá»‹ khÃ³a.' });
       }
       user.role = expectedRole;
       await user.save();
@@ -186,10 +205,10 @@ export const registerUser = async (req, res) => {
       return res.status(400).json({ message: 'User already exists' });
     }
 
-    const salt = await bcrypt.genSalt(10);
+    const salt = await bcrypt.genSalt(SALT_ROUNDS);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    const role = email === 'thanhtinnguyen870@gmail.com' ? 'admin' : 'user';
+    const role = email === ADMIN_EMAIL ? 'admin' : 'user';
 
     const user = await User.create({
       name,
@@ -232,17 +251,17 @@ export const loginUser = async (req, res) => {
     const password = String(req.body.password || '');
 
     if (!email || !password) {
-      return res.status(400).json({ message: 'Vui lòng nhập đầy đủ email và mật khẩu.' });
+      return res.status(400).json({ message: 'Vui lÃ²ng nháº­p Ä‘áº§y Ä‘á»§ email vÃ  máº­t kháº©u.' });
     }
 
     const user = await User.findOne({ email });
 
     if (user && (await bcrypt.compare(password, user.password))) {
       if (user.isBlocked) {
-        return res.status(401).json({ message: 'Tài khoản của bạn đã bị khóa.' });
+        return res.status(401).json({ message: 'TÃ i khoáº£n cá»§a báº¡n Ä‘Ã£ bá»‹ khÃ³a.' });
       }
 
-      const expectedRole = user.email.toLowerCase() === 'thanhtinnguyen870@gmail.com' ? 'admin' : 'user';
+      const expectedRole = user.email.toLowerCase() === ADMIN_EMAIL ? 'admin' : 'user';
       if (user.role !== expectedRole) {
         user.role = expectedRole;
         await user.save();
@@ -263,11 +282,11 @@ export const loginUser = async (req, res) => {
         token
       });
     } else {
-      res.status(401).json({ message: 'Email hoặc mật khẩu không chính xác.' });
+      res.status(401).json({ message: 'Email hoáº·c máº­t kháº©u khÃ´ng chÃ­nh xÃ¡c.' });
     }
   } catch (error) {
-    console.error('Lỗi đăng nhập:', error);
-    res.status(500).json({ message: error.message || 'Lỗi hệ thống khi đăng nhập.' });
+    console.error('Lá»—i Ä‘Äƒng nháº­p:', error);
+    res.status(500).json({ message: error.message || 'Lá»—i há»‡ thá»‘ng khi Ä‘Äƒng nháº­p.' });
   }
 };
 
@@ -278,7 +297,7 @@ export const getUserProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select('-password').populate('favoriteFoods');
     if (user) {
-      const expectedRole = user.email.toLowerCase() === 'thanhtinnguyen870@gmail.com' ? 'admin' : 'user';
+      const expectedRole = user.email.toLowerCase() === ADMIN_EMAIL ? 'admin' : 'user';
       if (user.role !== expectedRole) {
         user.role = expectedRole;
         await user.save();
@@ -335,11 +354,11 @@ export const changePassword = async (req, res) => {
     const { currentPassword, newPassword } = req.body;
 
     if (!currentPassword || !newPassword) {
-      return res.status(400).json({ message: 'Vui lòng nhập mật khẩu hiện tại và mật khẩu mới.' });
+      return res.status(400).json({ message: 'Vui lÃ²ng nháº­p máº­t kháº©u hiá»‡n táº¡i vÃ  máº­t kháº©u má»›i.' });
     }
 
     if (newPassword.length < 6) {
-      return res.status(400).json({ message: 'Mật khẩu mới phải có ít nhất 6 ký tự.' });
+      return res.status(400).json({ message: 'Máº­t kháº©u má»›i pháº£i cÃ³ Ã­t nháº¥t 6 kÃ½ tá»±.' });
     }
 
     const user = await User.findById(req.user._id);
@@ -348,19 +367,19 @@ export const changePassword = async (req, res) => {
     }
 
     if (!user.password) {
-      return res.status(400).json({ message: 'Tài khoản đăng nhập qua Google không thể đổi mật khẩu theo cách này.' });
+      return res.status(400).json({ message: 'TÃ i khoáº£n Ä‘Äƒng nháº­p qua Google khÃ´ng thá»ƒ Ä‘á»•i máº­t kháº©u theo cÃ¡ch nÃ y.' });
     }
 
     const isMatch = await bcrypt.compare(currentPassword, user.password);
     if (!isMatch) {
-      return res.status(400).json({ message: 'Mật khẩu hiện tại không đúng.' });
+      return res.status(400).json({ message: 'Máº­t kháº©u hiá»‡n táº¡i khÃ´ng Ä‘Ãºng.' });
     }
 
-    const salt = await bcrypt.genSalt(10);
+    const salt = await bcrypt.genSalt(SALT_ROUNDS);
     user.password = await bcrypt.hash(newPassword, salt);
     await user.save();
 
-    res.json({ message: 'Đã thay đổi mật khẩu thành công.' });
+    res.json({ message: 'ÄÃ£ thay Ä‘á»•i máº­t kháº©u thÃ nh cÃ´ng.' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -390,18 +409,18 @@ export const addFavorite = async (req, res) => {
     const foodId = req.params.foodId;
     const index = user.favoriteFoods.findIndex((id) => id.toString() === foodId);
 
-    // 3. Kiểm tra trạng thái món ăn trong danh sách yêu thích
+    // 3. Kiá»ƒm tra tráº¡ng thÃ¡i mÃ³n Äƒn trong danh sÃ¡ch yÃªu thÃ­ch
     if (index !== -1) {
-      // 3.2. Món ăn đã tồn tại trong danh sách, hiển thị thông báo và kết thúc
-      return res.status(400).json({ message: 'Món ăn đã tồn tại trong danh sách yêu thích', isFavorited: true });
+      // 3.2. MÃ³n Äƒn Ä‘Ã£ tá»“n táº¡i trong danh sÃ¡ch, hiá»ƒn thá»‹ thÃ´ng bÃ¡o vÃ  káº¿t thÃºc
+      return res.status(400).json({ message: 'MÃ³n Äƒn Ä‘Ã£ tá»“n táº¡i trong danh sÃ¡ch yÃªu thÃ­ch', isFavorited: true });
     }
 
-    // 4. Thêm món ăn vào danh sách yêu thích
+    // 4. ThÃªm mÃ³n Äƒn vÃ o danh sÃ¡ch yÃªu thÃ­ch
     user.favoriteFoods.push(foodId);
     await user.save();
     
-    // 5. Thông báo thêm thành công
-    res.json({ message: 'Thêm vào danh sách yêu thích thành công', isFavorited: true, favoriteFoods: user.favoriteFoods });
+    // 5. ThÃ´ng bÃ¡o thÃªm thÃ nh cÃ´ng
+    res.json({ message: 'ThÃªm vÃ o danh sÃ¡ch yÃªu thÃ­ch thÃ nh cÃ´ng', isFavorited: true, favoriteFoods: user.favoriteFoods });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -423,7 +442,7 @@ export const removeFavorite = async (req, res) => {
       await user.save();
     }
 
-    res.json({ message: 'Đã xóa khỏi danh sách yêu thích', isFavorited: false, favoriteFoods: user.favoriteFoods });
+    res.json({ message: 'ÄÃ£ xÃ³a khá»i danh sÃ¡ch yÃªu thÃ­ch', isFavorited: false, favoriteFoods: user.favoriteFoods });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -458,3 +477,5 @@ export const updateHealthProfile = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+

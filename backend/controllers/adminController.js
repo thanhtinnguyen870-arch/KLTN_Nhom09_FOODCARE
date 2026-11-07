@@ -306,3 +306,32 @@ export const markNotificationAsRead = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+// @desc    Delete a notification
+// @route   DELETE /api/admin/notifications/:id
+// @access  Private/Admin
+export const deleteNotification = async (req, res) => {
+  try {
+    const notification = await Notification.findById(req.params.id);
+    if (notification) {
+      await notification.deleteOne();
+      res.json({ message: 'Đã xóa thông báo thành công' });
+    } else {
+      res.status(404).json({ message: 'Không tìm thấy thông báo' });
+    }
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Delete all notifications
+// @route   DELETE /api/admin/notifications
+// @access  Private/Admin
+export const clearAllNotifications = async (req, res) => {
+  try {
+    const result = await Notification.deleteMany({});
+    res.json({ message: `Đã xóa toàn bộ ${result.deletedCount} thông báo` });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};

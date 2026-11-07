@@ -1,3 +1,4 @@
+// FoodCare AI Backend Server
 import dns from 'node:dns';
 dns.setDefaultResultOrder('ipv4first');
 
@@ -61,16 +62,33 @@ app.get('/', (req, res) => {
   res.send('API is running...');
 });
 
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Middleware
 app.use(notFound);
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
 
+// Phòng ngừa server bị crash do các unhandled rejection ngoài ý muốn (vd từ AI SDK, Nodemailer)
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[Unhandled Rejection at]:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[Uncaught Exception]:', err);
+});
+
 const startServer = async () => {
   try {
     await connectDB();
-    server.listen(PORT, () => {
+    server.listen(PORT, '0.0.0.0', () => {
       console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
     });
   } catch (error) {
