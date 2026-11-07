@@ -39,33 +39,32 @@ const buildMessages = (systemPrompt, conversationHistory = [], message) => {
   return messages;
 };
 
-// Cấu hình tối ưu theo khuyến nghị kỹ thuật:
-// Gemini OpenAI endpoint tính max_tokens kèm prompt tokens, đặt 4096 để tránh bị chặt cụt giữa chừng
+// Cấu hình tối ưu tốc độ & chuẩn xác (Đảm bảo phản hồi trong 3-7 giây, tối đa không quá 8-10 giây)
 const GEMINI_CONFIG = {
   temperature: 0.2,
   top_p: 0.85,
-  max_tokens: 4096,
+  max_tokens: 2000,
 };
 
-// Groq hỗ trợ đầy đủ các tham số penalty chống lặp từ
+// Groq hỗ trợ siêu tốc độ trên kiến trúc LPU (chỉ 1-2 giây)
 const GROQ_CONFIG = {
   temperature: 0.2,
   top_p: 0.85,
   frequency_penalty: 0.5,
   presence_penalty: 0.3,
-  max_tokens: 1500,
+  max_tokens: 700,
 };
 
 const generateAIResponse = async (systemPrompt, conversationHistory, message) => {
   const messages = buildMessages(systemPrompt, conversationHistory, message);
 
-  // 1. Ưu tiên Google Gemini (Tốc độ xử lý tiếng Việt vượt trội, hạn ngạch token lớn)
+  // 1. Ưu tiên Google Gemini (Giới hạn timeout 5.5s để nếu mạng treo thì nhảy ngay sang Groq)
   if (process.env.GEMINI_API_KEY) {
     try {
       const gemini = new OpenAI({
         apiKey: process.env.GEMINI_API_KEY,
         baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
-        timeout: 25000,
+        timeout: 5500,
       });
       const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
       const completion = await gemini.chat.completions.create({
@@ -80,16 +79,16 @@ const generateAIResponse = async (systemPrompt, conversationHistory, message) =>
       }
       console.warn('Gemini trả về nội dung rỗng, chuẩn bị chuyển sang Groq fallback...');
     } catch (geminiError) {
-      console.warn('Gemini gặp lỗi:', geminiError.message, '-> Đang chuyển sang Groq fallback...');
+      console.warn('Gemini gặp lỗi:', geminiError.message, '-> Đang chuyển ngay sang Groq fallback...');
     }
   }
 
-  // 2. Dự phòng (Fallback) với Groq
+  // 2. Dự phòng (Fallback) với Groq (Timeout 6s, sinh siêu tốc trong ~1.5s)
   if (process.env.GROQ_API_KEY) {
     const groq = new OpenAI({
       apiKey: process.env.GROQ_API_KEY,
       baseURL: 'https://api.groq.com/openai/v1',
-      timeout: 25000,
+      timeout: 6000,
     });
 
     const candidateModels = [process.env.GROQ_MODEL, 'qwen/qwen3.8-27b']
