@@ -40,19 +40,19 @@ const buildMessages = (systemPrompt, conversationHistory = [], message) => {
 };
 
 // Cấu hình tối ưu theo khuyến nghị kỹ thuật:
-// Gemini OpenAI endpoint tính max_tokens kèm prompt tokens, cần để 3000 để tránh bị chặt cụt giữa chừng
+// Gemini OpenAI endpoint tính max_tokens kèm prompt tokens, đặt 4096 để tránh bị chặt cụt giữa chừng
 const GEMINI_CONFIG = {
-  temperature: 0.25,
+  temperature: 0.2,
   top_p: 0.85,
-  max_tokens: 3000,
+  max_tokens: 4096,
 };
 
 // Groq hỗ trợ đầy đủ các tham số penalty chống lặp từ
 const GROQ_CONFIG = {
-  temperature: 0.25,
+  temperature: 0.2,
   top_p: 0.85,
-  frequency_penalty: 0.4,
-  presence_penalty: 0.2,
+  frequency_penalty: 0.5,
+  presence_penalty: 0.3,
   max_tokens: 1500,
 };
 
@@ -67,7 +67,7 @@ const generateAIResponse = async (systemPrompt, conversationHistory, message) =>
         baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
         timeout: 25000,
       });
-      const model = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+      const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
       const completion = await gemini.chat.completions.create({
         model,
         messages,
@@ -92,7 +92,7 @@ const generateAIResponse = async (systemPrompt, conversationHistory, message) =>
       timeout: 25000,
     });
 
-    const candidateModels = [process.env.GROQ_MODEL, 'qwen/qwen3.8-27b', 'allam-2-7b']
+    const candidateModels = [process.env.GROQ_MODEL, 'qwen/qwen3.8-27b']
       .filter(Boolean)
       .filter((m, idx, arr) => arr.indexOf(m) === idx);
 
@@ -117,13 +117,9 @@ const generateAIResponse = async (systemPrompt, conversationHistory, message) =>
   throw new Error('Không thể kết nối đến cả dịch vụ Gemini lẫn Groq AI.');
 };
 
-const extractRecommendedFoodNames = (aiResponseText) => {
+const extractRecommendedFoodNames = (aiResponseText, availableFoods = []) => {
   const recMatch = aiResponseText.match(/(?:\*{0,2})RECOMMENDATIONS(?:\*{0,2})\s*:\s*(\[[\s\S]*?\]|.+)$/i);
-  if (!recMatch?.[1]) {
-    return { responseMessage: aiResponseText, recommendedFoodNames: [] };
-  }
-
-  let rawRecommendations = recMatch[1].trim().replace(/^```(?:json)?|```$/g, '').trim();
+  let rawRecommendations = recMatch?.[1] ? recMatch[1].trim().replace(/^```(?:json)?|```$/g, '').trim() : '';
   let recommendedFoodNames = [];
 
   if (rawRecommendations.startsWith('[')) {
@@ -134,12 +130,33 @@ const extractRecommendedFoodNames = (aiResponseText) => {
     }
   }
 
-  if (recommendedFoodNames.length === 0) {
+  if (recommendedFoodNames.length === 0 && rawRecommendations) {
     recommendedFoodNames = rawRecommendations
       .replace(/^\[|\]$/g, '')
       .split(',')
       .map((name) => name.trim().replace(/^["'*]+|["'*]+$/g, ''))
       .filter(Boolean);
+  }
+
+  // Fallback an toàn: Nếu AI bị ngắt cụt mất dòng RECOMMENDATIONS, tự động quét tên món in đậm trong văn bản
+  if (recommendedFoodNames.length === 0 && Array.isArray(availableFoods) && availableFoods.length > 0) {
+    const boldMatches = aiResponseText.match(/\*\*([^*]+)\*\*/g) || [];
+    for (const bold of boldMatches) {
+      const cleanBold = bold.replace(/\*\*/g, '').trim();
+      const found = availableFoods.find(f => f.name.toLowerCase() === cleanBold.toLowerCase());
+      if (found && !recommendedFoodNames.includes(found.name)) {
+        recommendedFoodNames.push(found.name);
+      }
+    }
+    // Nếu vẫn chưa có và không phải câu chào/xã giao/từ chối
+    if (recommendedFoodNames.length === 0 && !/chào|hẹn gặp|thời tiết|chúc bạn/i.test(aiResponseText)) {
+      for (const f of availableFoods) {
+        if (aiResponseText.includes(f.name) && !recommendedFoodNames.includes(f.name)) {
+          recommendedFoodNames.push(f.name);
+          if (recommendedFoodNames.length >= 3) break;
+        }
+      }
+    }
   }
 
   return {
@@ -321,28 +338,64 @@ export const recommendFood = async (req, res) => {
       }).join('\n')
       : 'Khách hàng chưa có đơn hàng nào gần đây.';
 
-    // 4. LẤY LỊCH SỬ CHAT GẦN NHẤT (Giữ 8 tin nhắn gần nhất, bắt buộc đủ cặp user-assistant để bảo toàn luân phiên role)
+    // 4. LẤY LỊCH SỬ CHAT GẦN NHẤT & TỔNG HỢP MÓN ĐÃ TỪNG GỢI Ý (CHỐNG LẶP MÓN VÀ LẶP TỪ TUYỆT ĐỐI)
     const recentChats = await AIChat.find({ user: user._id })
       .sort({ createdAt: -1 })
-      .limit(8)
+      .limit(10)
+      .populate('recommendedFoods', 'name')
       .lean();
     recentChats.reverse();
+
+    // Tập hợp danh sách các món ăn đã được gợi ý trong các câu chat gần đây để đưa vào danh sách cấm lặp
+    const previouslyRecommendedSet = new Set();
+    for (const c of recentChats) {
+      if (Array.isArray(c.recommendedFoods)) {
+        for (const rf of c.recommendedFoods) {
+          if (rf?.name) previouslyRecommendedSet.add(rf.name.trim());
+        }
+      }
+      const resText = c.response || '';
+      for (const f of availableFoods) {
+        if (resText.includes(f.name)) {
+          previouslyRecommendedSet.add(f.name.trim());
+        }
+      }
+    }
+    const alreadyRecommendedList = Array.from(previouslyRecommendedSet);
 
     const cleanHistoryText = (text = '') =>
       String(text)
         .replace(/(?:\n|^)\s*(?:\*{0,2})RECOMMENDATIONS(?:\*{0,2})\s*:[\s\S]*$/i, '')
         .trim();
 
-    const conversationHistory = recentChats
+    // Giữ 6 tin nhắn gần nhất để giữ ngữ cảnh gọn gàng, súc tích (chống tràn token)
+    const conversationHistory = recentChats.slice(-6)
       .map((c) => ({
-        user: c.message ? String(c.message).slice(0, 400) : '',
-        assistant: c.response ? cleanHistoryText(c.response).slice(0, 600) : '',
+        user: c.message ? String(c.message).slice(0, 300) : '',
+        assistant: c.response ? cleanHistoryText(c.response).slice(0, 450) : '',
       }))
       .filter((c) => Boolean(c.user && c.assistant));
+
+    const isOngoingConversation = conversationHistory.length > 0;
+    const conversationFlowConstraint = isOngoingConversation
+      ? `\n⚠️ QUY TẮC BẮT BUỘC KHI ĐANG TRONG CUỘC HỘI THOẠI (Lượt chat tiếp theo):
+- TUYỆT ĐỐI CẤM chào hỏi lại (CẤM các từ: "Chào anh...", "Chào bạn...", "Xin chào...", "FoodCare rất vui...", "FoodCare xin giới thiệu...", "Chào [Tên]...").
+- KHÔNG lặp lại tên khách hàng hoặc xin lỗi rườm rà.
+- BẮT BUỘC ĐI THẲNG VÀO NỘI DUNG hoặc danh sách món mới ngay từ từ đầu tiên của câu đầu tiên!`
+      : `LƯỢT CHAT ĐẦU TIÊN: Có thể chào hỏi thân thiện trong 1 câu ngắn gọn rồi đi thẳng vào tư vấn.`;
+
+    const previouslyRecommendedConstraint = alreadyRecommendedList.length > 0
+      ? `\n⚠️ DANH SÁCH MÓN ĐÃ GỢI Ý CHO KHÁCH TRONG CÁC LƯỢT TRƯỚC: [${alreadyRecommendedList.join(', ')}]
+=> NGUYÊN TẮC CHỐNG LẶP MÓN (BẮT BUỘC): Khách hàng ghét nhất bị lặp món! Khi khách hỏi "còn món nào khác không", "đổi món", "ngoài ra...", "bị lặp món", hoặc tiếp tục yêu cầu món ăn:
++ TUYỆT ĐỐI CẤM gợi ý lại bất kỳ món nào đã có trong danh sách trên.
++ BẮT BUỘC chọn 100% món MỚI HOÀN TOÀN từ thực đơn hiện có.`
+      : '';
 
     // 5. SYSTEM PROMPT THEO QUY TRÌNH XỬ LÝ & PHÂN LOẠI Ý ĐỊNH
     const systemPrompt = `# VAI TRÒ & ĐỊNH DANH
 Bạn là "Trợ lý Dinh dưỡng AI của FoodCare" – chuyên gia tư vấn thực đơn lành mạnh và chăm sóc khách hàng trên website thương mại điện tử FoodCare.
+${conversationFlowConstraint}
+${previouslyRecommendedConstraint}
 
 # DỮ LIỆU ĐẦU VÀO THỜI GIAN THỰC (CONTEXT)
 1. Hồ sơ sức khỏe của khách hàng hiện tại:
@@ -377,9 +430,9 @@ Trước khi trả lời, bạn PHẢI đọc kỹ câu nhắn mới nhất củ
 - TRƯỜNG HỢP 2: Khách cần tư vấn món ăn hoặc hỏi về tình trạng sức khỏe / bệnh lý (Ví dụ: "Tôi bị tiểu đường", "Tôi đang giảm cân", "Tư vấn bữa trưa"):
   + BẮT BUỘC đối chiếu với [1. Hồ sơ sức khỏe của khách hàng].
   + TUYỆT ĐỐI KHÔNG gợi ý món ăn chứa thành phần khách bị dị ứng (${allergies}) hoặc kỵ với bệnh lý (${healthConditions}).
-  + Chọn tối đa 2-3 món phù hợp nhất từ [2. Thực đơn hiện có]. Nêu rõ: Tên món + Giá tiền + Lượng Calo + Giải thích ngắn gọn 1 câu vì sao món đó phù hợp với thể trạng của khách.
+  + Chọn tối đa 2-3 món phù hợp nhất từ [2. Thực đơn hiện có]. Nêu rõ: Tên món + Giá tiền + Lượng Calo + Giải thích ngắn gọn 1 câu (dưới 15 từ) vì sao món đó phù hợp.
   + Nếu Hồ sơ sức khỏe đang trống, hãy tư vấn dựa trên câu hỏi hiện tại và nhắc nhẹ khách vào mục "Hồ sơ sức khỏe" trên web FoodCare (/profile) cập nhật chiều cao, cân nặng để lần sau AI tính toán chuẩn hơn.
-  + Nếu khách yêu cầu loại trừ hoặc đổi món (như "ngoài cá còn món gì", "đổi món khác", "không ăn gà"): TUYỆT ĐỐI CẤM nhắc lại món bị loại trừ, không lặp lại món vừa gợi ý ở câu trước, chọn món mới hoàn toàn từ thực đơn.
+  + Nếu khách yêu cầu loại trừ hoặc đổi món (như "ngoài cá còn món gì", "đổi món khác", "còn món nào khác không", "bị lặp món"): TUYỆT ĐỐI CẤM nhắc lại món bị loại trừ, TUYỆT ĐỐI CẤM lặp lại các món trong danh sách [MÓN ĐÃ GỢI Ý], chọn món mới 100% từ thực đơn.
 
 - TRƯỜNG HỢP 3: Khách chào hỏi xã giao hoặc nói chuyện ngắn (Ví dụ: "Xin chào", "Cảm ơn shop", "Ok bạn"):
   + Đáp lại tự nhiên, thân thiện trong 1-2 câu ngắn gọn. Không tự động xả cả danh sách thực đơn ra nếu khách chưa yêu cầu gợi ý món.
@@ -390,11 +443,11 @@ Trước khi trả lời, bạn PHẢI đọc kỹ câu nhắn mới nhất củ
 - TRƯỜNG HỢP 5: Câu hỏi ngoài lề (code, giải toán, thời tiết, chính trị, phim ảnh...):
   + Từ chối khéo léo trong 1 câu: "Mình là Trợ lý Dinh dưỡng của FoodCare nên chỉ có thể hỗ trợ bạn chọn món ăn theo sức khỏe và giải đáp dịch vụ trên website thôi nhé!"
 
-# QUY TẮC CHỐNG LẶP & KIỂM SOÁT CHẤT LƯỢNG ĐẦU RA
-1. Không dùng câu mở đầu rập khuôn: Tuyệt đối KHÔNG mở đầu mọi tin nhắn bằng cụm từ máy móc "Gợi ý thực đơn dinh dưỡng hôm nay cho bạn:" trừ khi khách thực sự yêu cầu lên thực đơn.
-2. Không lặp lại lịch sử: Không lặp lại câu hỏi của người dùng và không sao chép lại nguyên xi câu trả lời của chính bạn ở lượt chat liền trước.
-3. Không bịa đặt (Zero Hallucination): Chỉ báo đúng tên món và mức giá có trong dữ liệu thực đơn.
-4. Ngắn gọn & Trực diện: Đi thẳng vào câu trả lời ngay từ câu đầu tiên, in đậm **Tên món**, trình bày thoáng mắt bằng gạch đầu dòng khi liệt kê món, tổng độ dài không quá 5-6 câu.
+# QUY TẮC CHỐNG LẶP & KIỂM SOÁT ĐỘ DÀI (CHỐNG CẮT CỤT CÂU)
+1. Không chào hỏi lặp lại: Khi đang trong cuộc trò chuyện, TUYỆT ĐỐI KHÔNG mở đầu bằng "Chào anh...", "Xin chào...", "FoodCare rất vui...". Đi thẳng vào câu trả lời ngay từ câu đầu tiên.
+2. Không lặp lại món ăn: TUYỆT ĐỐI KHÔNG gợi ý lại các món đã nằm trong danh sách [MÓN ĐÃ GỢI Ý TRƯỚC ĐÓ].
+3. Mỗi món chỉ viết đúng 1 câu giải thích ngắn gọn (tối đa 15-20 từ) để đảm bảo câu trả lời luôn hoàn chỉnh, không bao giờ bị cắt cụt.
+4. Không bịa đặt (Zero Hallucination): Chỉ báo đúng tên món và mức giá có trong dữ liệu thực đơn.
 5. Cú pháp kỹ thuật bắt buộc ở dòng cuối cùng:
 Dòng cuối cùng BẮT BUỘC có dạng: RECOMMENDATIONS: ["Tên món 1", "Tên món 2"] (chỉ chứa tên chính xác của 1-3 món ăn CÒN HÀNG bạn vừa gợi ý, nếu không gợi ý món nào hoặc khách hỏi việc khác thì để RECOMMENDATIONS: []).`;
 
@@ -427,7 +480,7 @@ Dòng cuối cùng BẮT BUỘC có dạng: RECOMMENDATIONS: ["Tên món 1", "T�
       }
     }
 
-    const { responseMessage, recommendedFoodNames } = extractRecommendedFoodNames(aiResponseText);
+    const { responseMessage, recommendedFoodNames } = extractRecommendedFoodNames(aiResponseText, availableFoods);
 
     let recommendedFoods = [];
     if (recommendedFoodNames.length > 0) {
