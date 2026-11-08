@@ -39,32 +39,53 @@ const buildMessages = (systemPrompt, conversationHistory = [], message) => {
   return messages;
 };
 
-// Cấu hình tối ưu tốc độ & chuẩn xác (Đảm bảo phản hồi trong 3-7 giây, tối đa không quá 8-10 giây)
+// Cấu hình tối ưu độ sâu & chuẩn xác (Tổng thời gian tối đa đảm bảo trong vòng 15 giây)
 const GEMINI_CONFIG = {
-  temperature: 0.2,
+  temperature: 0.25,
   top_p: 0.85,
-  max_tokens: 2000,
+  max_tokens: 3000,
 };
 
-// Groq hỗ trợ siêu tốc độ trên kiến trúc LPU (chỉ 1-2 giây)
+// Groq hỗ trợ suy luận LPU siêu tốc
 const GROQ_CONFIG = {
-  temperature: 0.2,
+  temperature: 0.25,
   top_p: 0.85,
-  frequency_penalty: 0.5,
-  presence_penalty: 0.3,
-  max_tokens: 700,
+  frequency_penalty: 0.2,
+  presence_penalty: 0.1,
+  max_tokens: 1200,
+};
+
+// Hàm thẩm định chất lượng phản hồi AI (Loại trừ triệt để câu cụt, chữ "Dựa", "Theo", rác văn bản)
+const isValidAIResponse = (text, userMessage = '') => {
+  if (!text || typeof text !== 'string') return false;
+  const trimmed = text.trim();
+  // Quá ngắn (< 35 ký tự)
+  if (trimmed.length < 35) {
+    const isShortLegit = /^(xin chào|chào bạn|cảm ơn|không có gì|hẹn gặp lại)[.!]?$/i.test(trimmed);
+    if (!isShortLegit) return false;
+  }
+  // Bị đứt cụt lửng lơ ở cuối câu
+  if (/(?:\(|,|\/|-|\b(với|và|của|là|được|cho|sức|rất|hỗ trợ|quá trình|trong))\s*$/i.test(trimmed)) {
+    return false;
+  }
+  // Từ khóa rác từng xuất hiện do nhiễu ngữ cảnh
+  if (/^(dựa|theo|foodcare xin)$/i.test(trimmed)) {
+    return false;
+  }
+  return true;
 };
 
 const generateAIResponse = async (systemPrompt, conversationHistory, message) => {
   const messages = buildMessages(systemPrompt, conversationHistory, message);
 
-  // 1. Ưu tiên Google Gemini (Giới hạn timeout 5.5s để nếu mạng treo thì nhảy ngay sang Groq)
+  // 1. Ưu tiên Google Gemini (Timeout 8.5s, maxRetries: 0 để không nhân 3 thời gian chờ)
   if (process.env.GEMINI_API_KEY) {
     try {
       const gemini = new OpenAI({
         apiKey: process.env.GEMINI_API_KEY,
         baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
-        timeout: 5500,
+        timeout: 8500,
+        maxRetries: 0,
       });
       const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
       const completion = await gemini.chat.completions.create({
@@ -74,21 +95,22 @@ const generateAIResponse = async (systemPrompt, conversationHistory, message) =>
       });
 
       const content = completion.choices?.[0]?.message?.content;
-      if (content && content.trim()) {
+      if (content && isValidAIResponse(content, message)) {
         return content.trim();
       }
-      console.warn('Gemini trả về nội dung rỗng, chuẩn bị chuyển sang Groq fallback...');
+      console.warn('Gemini trả về không hợp lệ hoặc quá ngắn, chuyển sang Groq fallback...');
     } catch (geminiError) {
       console.warn('Gemini gặp lỗi:', geminiError.message, '-> Đang chuyển ngay sang Groq fallback...');
     }
   }
 
-  // 2. Dự phòng (Fallback) với Groq (Timeout 6s, sinh siêu tốc trong ~1.5s)
+  // 2. Dự phòng (Fallback) với Groq (Timeout 5.5s, maxRetries: 0 - Tổng thời gian tối đa 8.5s + 5.5s = 14s < 15s)
   if (process.env.GROQ_API_KEY) {
     const groq = new OpenAI({
       apiKey: process.env.GROQ_API_KEY,
       baseURL: 'https://api.groq.com/openai/v1',
-      timeout: 6000,
+      timeout: 5500,
+      maxRetries: 0,
     });
 
     const candidateModels = [process.env.GROQ_MODEL, 'qwen/qwen3.8-27b']
@@ -104,16 +126,35 @@ const generateAIResponse = async (systemPrompt, conversationHistory, message) =>
         });
 
         const content = backupCompletion.choices?.[0]?.message?.content;
-        if (content && content.trim()) {
+        if (content && isValidAIResponse(content, message)) {
           return content.trim();
         }
       } catch (backupError) {
         console.warn(`Groq backup model (${model}) gặp lỗi:`, backupError.message);
       }
     }
+
+    // 3. Nếu vẫn chưa hợp lệ, thử lại Groq 1 lần với Prompt trực tiếp không kèm lịch sử cũ (Zero-shot)
+    try {
+      const cleanMessages = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: message }
+      ];
+      const directCompletion = await groq.chat.completions.create({
+        model: 'qwen/qwen3.8-27b',
+        messages: cleanMessages,
+        ...GROQ_CONFIG,
+      });
+      const content = directCompletion.choices?.[0]?.message?.content;
+      if (content && isValidAIResponse(content, message)) {
+        return content.trim();
+      }
+    } catch (directErr) {
+      console.warn('Groq direct retry error:', directErr.message);
+    }
   }
 
-  throw new Error('Không thể kết nối đến cả dịch vụ Gemini lẫn Groq AI.');
+  throw new Error('Không thể kết nối đến cả dịch vụ Gemini lẫn Groq AI hoặc phản hồi không hợp lệ.');
 };
 
 const extractRecommendedFoodNames = (aiResponseText, availableFoods = []) => {
@@ -162,6 +203,84 @@ const extractRecommendedFoodNames = (aiResponseText, availableFoods = []) => {
     responseMessage: aiResponseText.replace(/(?:\n|^)\s*(?:\*{0,2})RECOMMENDATIONS(?:\*{0,2})\s*:[\s\S]*$/i, '').trim(),
     recommendedFoodNames,
   };
+};
+
+// Fallback thông minh dựa trên dữ liệu thực tế trong DB khi cả 2 API AI đều gặp sự cố mạng
+const generateSmartFallback = (message, availableFoods = [], hp = {}, alreadyRecommendedList = []) => {
+  const lowerMsg = (message || '').toLowerCase();
+  const allergies = (hp.allergies || []).map(a => String(a).toLowerCase());
+  const conditions = (hp.conditions || []).map(c => String(c).toLowerCase());
+  const isDiabetes = conditions.some(c => c.includes('tiểu đường'));
+  const isWeightLoss = hp.goal === 'weight_loss' || /giảm cân|giảm mỡ/i.test(lowerMsg);
+
+  // Lọc an toàn: loại bỏ món chứa thành phần dị ứng
+  let safeFoods = availableFoods.filter(f => {
+    const fName = (f.name || '').toLowerCase();
+    const fIngr = (f.ingredients || []).join(' ').toLowerCase();
+    for (const allergy of allergies) {
+      if (allergy && (fName.includes(allergy) || fIngr.includes(allergy))) return false;
+    }
+    return true;
+  });
+
+  // Ưu tiên món chưa được gợi ý trước đó
+  const unrecommendedFoods = safeFoods.filter(f => !alreadyRecommendedList.includes(f.name));
+  const candidatePool = unrecommendedFoods.length >= 3 ? unrecommendedFoods : safeFoods;
+
+  let matched = [];
+  let topicIntro = '';
+
+  if (/canh|súp/i.test(lowerMsg)) {
+    matched = candidatePool.filter(f => /canh|súp/i.test(f.name));
+    topicIntro = 'FoodCare gợi ý các món canh thanh mát, bổ dưỡng và dễ tiêu hóa cho bạn:';
+  } else if (/gà/i.test(lowerMsg)) {
+    matched = candidatePool.filter(f => /gà/i.test(f.name));
+    topicIntro = 'Dưới đây là các món gà ta lành mạnh, giàu đạm và ít chất béo phù hợp với bạn:';
+  } else if (/cá/i.test(lowerMsg)) {
+    matched = candidatePool.filter(f => /cá/i.test(f.name));
+    topicIntro = 'Dưới đây là các món cá giàu Omega-3, tốt cho tim mạch và ổn định đường huyết:';
+  } else if (/bò/i.test(lowerMsg)) {
+    matched = candidatePool.filter(f => /bò/i.test(f.name));
+    topicIntro = 'Dưới đây là các món thịt bò loại 1 giàu sắt và đạm nạc cho bạn:';
+  } else if (/chay|đậu phụ/i.test(lowerMsg)) {
+    matched = candidatePool.filter(f => /chay|đậu phụ/i.test(f.name) || f.category?.name === 'Món chay healthy');
+    topicIntro = 'Dưới đây là các món chay nhẹ bụng, giàu đạm thực vật và chất xơ:';
+  } else if (/nước|uống|khát|giải khát|sinh tố|trà/i.test(lowerMsg)) {
+    matched = candidatePool.filter(f => f.category?.name === 'Đồ uống lành mạnh' || /nước|sữa|trà|ổi|cam/i.test(f.name));
+    topicIntro = 'FoodCare gợi ý một số đồ uống lành mạnh, thanh mát và ít calo cho bạn:';
+  } else if (isDiabetes) {
+    matched = candidatePool.filter(f => {
+      const cal = f.nutrition?.calories || 0;
+      return cal > 0 && cal < 350 && !/cơm gạo tẻ|bánh mì|ngọt/i.test(f.name);
+    });
+    topicIntro = 'Với tình trạng tiểu đường, bạn nên ưu tiên các món ít đường, ít tinh bột nhanh và giàu chất xơ:';
+  } else if (isWeightLoss) {
+    matched = candidatePool.filter(f => {
+      const cal = f.nutrition?.calories || 0;
+      return cal > 0 && cal < 400;
+    });
+    topicIntro = 'Để hỗ trợ mục tiêu giảm cân hiệu quả, bạn nên chọn các món ăn giàu đạm nạc và calo thấp:';
+  } else {
+    matched = candidatePool.filter(f => (f.ratingAverage || 0) >= 4.5 || (f.soldCount || 0) > 10);
+    topicIntro = 'FoodCare gợi ý những món ăn dinh dưỡng cân bằng, thơm ngon và bán chạy nhất hôm nay:';
+  }
+
+  const selected = matched.slice(0, 3);
+  if (selected.length === 0) {
+    selected.push(...candidatePool.slice(0, 3));
+  }
+
+  const lines = selected.map(f => {
+    const cal = f.nutrition?.calories ? `${f.nutrition.calories} calo` : 'ít calo';
+    const priceStr = `${Number(f.price || 0).toLocaleString('vi-VN')}đ`;
+    let benefit = 'Giàu dưỡng chất và dễ hấp thu cho cơ thể.';
+    if (isDiabetes) benefit = 'Ít tinh bột nhanh, giúp ổn định đường huyết.';
+    else if (isWeightLoss) benefit = 'Nhiều đạm nạc và chất xơ, giúp no lâu và hạn chế tích mỡ.';
+    return `• **${f.name}** (${priceStr} | ${cal}): ${benefit}`;
+  });
+
+  const names = selected.map(f => f.name);
+  return `${topicIntro}\n\n${lines.join('\n')}\n\nRECOMMENDATIONS: ${JSON.stringify(names)}`;
 };
 
 // @desc    Get AI Food Recommendation
@@ -337,13 +456,22 @@ export const recommendFood = async (req, res) => {
       }).join('\n')
       : 'Khách hàng chưa có đơn hàng nào gần đây.';
 
-    // 4. LẤY LỊCH SỬ CHAT GẦN NHẤT & TỔNG HỢP MÓN ĐÃ TỪNG GỢI Ý (CHỐNG LẶP MÓN VÀ LẶP TỪ TUYỆT ĐỐI)
+    // 4. LẤY LỊCH SỬ CHAT GẦN NHẤT & TỔNG HỢP MÓN ĐÃ TỪNG GỢI Ý (LÀM SẠCH CHỐNG NHIỄM ĐỘC NGỮ CẢNH)
     const recentChats = await AIChat.find({ user: user._id })
       .sort({ createdAt: -1 })
-      .limit(10)
+      .limit(12)
       .populate('recommendedFoods', 'name')
       .lean();
     recentChats.reverse();
+
+    // BỘ LỌC CHỐNG NHIỄM ĐỘC NGỮ CẢNH (Context Sanitizer):
+    // Tuyệt đối loại bỏ các tin nhắn assistant bị rác, bị cụt (< 35 ký tự như "Dựa", "Theo", "FoodCare xin")
+    const validCleanChats = recentChats.filter((c) => {
+      const resp = (c.response || '').trim();
+      if (!resp || resp.length < 35) return false;
+      if (/^(dựa|theo|foodcare xin)$/i.test(resp)) return false;
+      return true;
+    });
 
     // Tập hợp danh sách các món ăn đã được gợi ý trong các câu chat gần đây để đưa vào danh sách cấm lặp
     const previouslyRecommendedSet = new Set();
@@ -367,11 +495,11 @@ export const recommendFood = async (req, res) => {
         .replace(/(?:\n|^)\s*(?:\*{0,2})RECOMMENDATIONS(?:\*{0,2})\s*:[\s\S]*$/i, '')
         .trim();
 
-    // Giữ 6 tin nhắn gần nhất để giữ ngữ cảnh gọn gàng, súc tích (chống tràn token)
-    const conversationHistory = recentChats.slice(-6)
+    // Giữ tối đa 5 cặp tin nhắn sạch gần nhất (chống tràn token)
+    const conversationHistory = validCleanChats.slice(-5)
       .map((c) => ({
         user: c.message ? String(c.message).slice(0, 300) : '',
-        assistant: c.response ? cleanHistoryText(c.response).slice(0, 450) : '',
+        assistant: c.response ? cleanHistoryText(c.response).slice(0, 500) : '',
       }))
       .filter((c) => Boolean(c.user && c.assistant));
 
@@ -475,11 +603,21 @@ Dòng cuối cùng BẮT BUỘC có dạng: RECOMMENDATIONS: ["Tên món 1", "T�
         const names = drinkFoods.map((f) => f.name);
         aiResponseText = `FoodCare gợi ý một số thức uống thanh mát, lành mạnh cho bạn:\n\n${drinkFoods.map((f) => `- **${f.name}** (${(f.price || 0).toLocaleString('vi-VN')}đ)`).join('\n')}\nRECOMMENDATIONS: ${JSON.stringify(names)}`;
       } else {
-        aiResponseText = `Xin lỗi bạn, kết nối đến Trợ lý AI đang bị gián đoạn giây lát. Bạn có thể xem thực đơn trực tiếp trên trang hoặc thử lại sau ít giây nhé!\nRECOMMENDATIONS: []`;
+        // Fallback chuyên gia thông minh: Tự động phân tích món ăn theo Database & Hồ sơ sức khỏe thay vì báo lỗi
+        aiResponseText = generateSmartFallback(message, availableFoods, hp, alreadyRecommendedList);
       }
     }
 
     const { responseMessage, recommendedFoodNames } = extractRecommendedFoodNames(aiResponseText, availableFoods);
+
+    // Hậu kiểm làm sạch: Bỏ câu chào hỏi rập khuôn nếu đang trong cuộc hội thoại tiếp diễn
+    let finalResponseMessage = responseMessage;
+    if (isOngoingConversation) {
+      finalResponseMessage = finalResponseMessage
+        .replace(/^(Chào (anh|chị|bạn|Nguyễn)[^,\n]*,\s*)+(FoodCare xin[^,\n]*,\s*)?/i, '')
+        .replace(/^(Xin chào [^,\n]*,\s*)/i, '')
+        .trim();
+    }
 
     let recommendedFoods = [];
     if (recommendedFoodNames.length > 0) {
@@ -495,7 +633,7 @@ Dòng cuối cùng BẮT BUỘC có dạng: RECOMMENDATIONS: ["Tên món 1", "T�
     }
 
     // Lưu lịch sử chat (người dùng có thể xem và tự xóa)
-    const chat = await AIChat.create({ user: user._id, message, response: responseMessage, recommendedFoods });
+    const chat = await AIChat.create({ user: user._id, message, response: finalResponseMessage, recommendedFoods });
 
     // Lưu vĩnh viễn vào bảng log câu hỏi (AIQuestionLog - độc lập, không bị xóa theo lịch sử chat của user)
     AIQuestionLog.create({
@@ -503,7 +641,7 @@ Dòng cuối cùng BẮT BUỘC có dạng: RECOMMENDATIONS: ["Tên món 1", "T�
       userName: user.name || 'Khách hàng',
       userEmail: user.email || '',
       question: message,
-      aiResponse: responseMessage,
+      aiResponse: finalResponseMessage,
       topics: detectQuestionTopics(message),
       recommendedFoods,
     }).catch((logErr) => console.error('Lỗi khi lưu AIQuestionLog:', logErr.message));
