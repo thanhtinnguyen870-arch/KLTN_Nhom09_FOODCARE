@@ -13,6 +13,14 @@ const errorHandler = (err, req, res, next) => {
     message = 'Resource not found';
   }
 
+  if (err.name === 'MulterError' || (err.message && err.message.includes('Multipart'))) {
+    statusCode = 400;
+  }
+
+  if (err.statusCode) {
+    statusCode = err.statusCode;
+  }
+
   console.error(`[ERROR] ${statusCode} - ${message}\n${err.stack}`);
 
   res.status(statusCode).json({

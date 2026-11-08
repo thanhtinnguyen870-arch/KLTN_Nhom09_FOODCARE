@@ -16,6 +16,10 @@ axiosClient.interceptors.request.use((config) => {
     config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${token}`;
   }
+  // Tự động xóa Content-Type khi gửi FormData để browser tự tính boundary cho multipart/form-data
+  if (config.data instanceof FormData) {
+    delete config.headers['Content-Type'];
+  }
   return config;
 });
 

@@ -132,9 +132,7 @@ const FoodDetail = () => {
         );
         const formData = new FormData();
         processedFiles.forEach((file) => formData.append('media', file));
-        const { data } = await axiosClient.post('/upload/review-media', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
+        const { data } = await axiosClient.post('/upload/review-media', formData);
         mediaUrls = data.files;
       } catch {
         toast.error('Lỗi khi tải lên file đính kèm.');

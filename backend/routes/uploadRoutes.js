@@ -17,7 +17,16 @@ const foodUploadDirectory = path.resolve(__dirname, '../uploads/foods');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
-const allowedImageTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+const allowedImageTypes = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'image/jfif',
+  'image/pjpeg',
+  'image/x-png',
+]);
 const allowedVideoTypes = new Map([
   ['video/mp4', '.mp4'],
   ['video/webm', '.webm'],
@@ -29,8 +38,14 @@ const memoryUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB raw max
   fileFilter(req, file, cb) {
-    if (allowedImageTypes.has(file.mimetype)) return cb(null, true);
-    cb(new Error('Chỉ chấp nhận file hình ảnh (jpg/png/webp/gif)!'));
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const validExts = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.jfif'];
+    if (allowedImageTypes.has(file.mimetype) || validExts.includes(ext)) {
+      return cb(null, true);
+    }
+    const err = new Error('Chỉ chấp nhận file hình ảnh (jpg/jpeg/png/webp/gif)!');
+    err.statusCode = 400;
+    cb(err);
   },
 });
 
@@ -130,6 +145,20 @@ router.post('/review-media', protect, uploadReviewMedia.array('media', 5), async
     console.error('Review media compress error:', err);
     res.status(500).json({ message: 'Lỗi xử lý file.' });
   }
+});
+
+// Xử lý lỗi Multer (giới hạn dung lượng, sai định dạng, thiếu boundary) trả về 400 thay vì 500
+router.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ message: 'Dung lượng file vượt quá giới hạn (tối đa 10MB).' });
+    }
+    return res.status(400).json({ message: `Lỗi tải file: ${err.message}` });
+  }
+  if (err) {
+    return res.status(err.statusCode || 400).json({ message: err.message || 'Lỗi xử lý file tải lên.' });
+  }
+  next();
 });
 
 export default router;

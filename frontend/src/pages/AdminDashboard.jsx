@@ -755,9 +755,7 @@ const AdminDashboard = () => {
       const formData = new FormData();
       formData.append('image', compressed);
 
-      const { data } = await axiosClient.post('/upload/food-image', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const { data } = await axiosClient.post('/upload/food-image', formData);
       setFoodForm((prev) => ({ ...prev, image: data.url }));
       toast.success('Đã tải ảnh lên thành công!');
     } catch (error) {
@@ -783,9 +781,7 @@ const AdminDashboard = () => {
       const formData = new FormData();
       formData.append('image', compressed);
 
-      const { data } = await axiosClient.post('/upload/avatar', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const { data } = await axiosClient.post('/upload/avatar', formData);
       const { data: updatedProfile } = await axiosClient.put('/auth/profile', { avatar: data.url });
       updateUser(updatedProfile);
       toast.success('Đã cập nhật avatar thành công!');

@@ -295,9 +295,7 @@ const Profile = () => {
 
     setUploading(true);
     try {
-      const { data } = await axiosClient.post('/upload/avatar', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const { data } = await axiosClient.post('/upload/avatar', formData);
       await axiosClient.put('/auth/profile', { avatar: data.url });
       updateUser({ avatar: data.url });
       setMessage('Đã cập nhật ảnh đại diện.');
